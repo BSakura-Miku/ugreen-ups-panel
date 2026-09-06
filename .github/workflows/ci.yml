@@ -26,7 +26,7 @@ jobs:
       - name: Validate Compose and the dashboard image
         run: |
           docker compose config --quiet
-          docker compose -f compose.yaml -f compose.build.yaml config --quiet
+          docker compose -f docker-compose.yaml -f compose.build.yaml config --quiet
           docker build -t ugreen-ups-panel:ci .
           python scripts/smoke-image.py --image ugreen-ups-panel:ci --platform linux/amd64
       - name: Validate host collector commands

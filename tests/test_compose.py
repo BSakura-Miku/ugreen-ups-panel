@@ -41,12 +41,12 @@ def compose_config(directory, files):
 
 
 def test_production_compose_uses_prebuilt_image_and_protected_bind_mounts(tmp_path):
-    shutil.copyfile(ROOT / 'compose.yaml', tmp_path / 'compose.yaml')
-    configuration = compose_config(tmp_path, ['compose.yaml'])
+    shutil.copyfile(ROOT / 'docker-compose.yaml', tmp_path / 'docker-compose.yaml')
+    configuration = compose_config(tmp_path, [])
     panel = configuration['services']['panel']
     assert panel['image'] == 'bsakuramiku/ugreen-ups-panel:latest'
     assert 'build' not in panel
-    assert configuration['name'] == 'ugreen-ups-panel'
+    assert configuration['name'] == tmp_path.name
     assert panel['ports'][0].get('host_ip', '0.0.0.0') == '0.0.0.0'
     assert str(panel['ports'][0]['published']) == '9086'
     mounts = {entry['target']: entry for entry in panel['volumes']}
@@ -60,10 +60,10 @@ def test_production_compose_uses_prebuilt_image_and_protected_bind_mounts(tmp_pa
 
 
 def test_old_env_variables_do_not_change_the_simple_compose_defaults(tmp_path):
-    shutil.copyfile(ROOT / 'compose.yaml', tmp_path / 'compose.yaml')
+    shutil.copyfile(ROOT / 'docker-compose.yaml', tmp_path / 'docker-compose.yaml')
     (tmp_path / '.env').write_text('UPS_IMAGE=unused:old\nUPS_BIND_IP=127.0.0.1\n'
                                   'UPS_PORT=1234\nUPS_DATA_DIR=./old-data\nTZ=UTC\n')
-    panel = compose_config(tmp_path, ['compose.yaml'])['services']['panel']
+    panel = compose_config(tmp_path, [])['services']['panel']
     assert panel['image'] == 'bsakuramiku/ugreen-ups-panel:latest'
     assert str(panel['ports'][0]['published']) == '9086'
     assert not panel.get('environment')
@@ -72,9 +72,9 @@ def test_old_env_variables_do_not_change_the_simple_compose_defaults(tmp_path):
 
 
 def test_source_build_override_is_separate_from_production_compose(tmp_path):
-    for name in ('compose.yaml', 'compose.build.yaml'):
+    for name in ('docker-compose.yaml', 'compose.build.yaml'):
         shutil.copyfile(ROOT / name, tmp_path / name)
-    panel = compose_config(tmp_path, ['compose.yaml', 'compose.build.yaml'])['services']['panel']
+    panel = compose_config(tmp_path, ['docker-compose.yaml', 'compose.build.yaml'])['services']['panel']
     assert panel['image'] == 'ugreen-ups-panel:local'
     assert panel['pull_policy'] == 'never'
     assert panel['build']['context'] == str(tmp_path)

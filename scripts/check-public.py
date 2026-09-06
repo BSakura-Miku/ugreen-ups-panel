@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FILES = (
     '.gitignore', '.dockerignore', '.github/workflows/ci.yml',
     'LICENSE', 'THIRD_PARTY_NOTICES.txt', 'README.md', 'README.en.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'SECURITY.md',
-    'Dockerfile', 'compose.yaml', 'compose.build.yaml', 'requirements.txt', 'requirements.lock', 'requirements-dev.txt',
+    'Dockerfile', 'docker-compose.yaml', 'compose.build.yaml', 'requirements.txt', 'requirements.lock', 'requirements-dev.txt',
     'deploy/ugreen-ups-collector.service', 'deploy/ugreen-ups-panel.tmpfiles.conf',
     'docs/fields.md', 'docs/calibration.md', 'docs/architecture.md', 'docs/hardware.md',
     'docs/validation.md', 'docs/DELIVERY.md', 'docs/assets/dashboard-demo.png',

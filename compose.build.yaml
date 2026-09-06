@@ -1,4 +1,4 @@
-# Optional source build; production uses the prebuilt image in compose.yaml.
+# Optional source build; production uses the prebuilt image in docker-compose.yaml.
 services:
   panel:
     image: ugreen-ups-panel:local

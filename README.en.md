@@ -59,7 +59,8 @@ The default image is `bsakuramiku/ugreen-ups-panel:latest`. Check [release notes
 
 ## Configuration and data
 
-- The default port is `9086`. To change the port or image version, edit `compose.yaml`, then run `docker compose up -d`.
+- The default port is `9086`. To change the port or image version, edit `docker-compose.yaml`, then run `docker compose up -d`.
+- Compose automatically reads `docker-compose.yaml`; the top-level `name` field is optional. By default, the project name comes from the deployment directory, so the steps above use `ugreen-ups-panel`.
 - History lives in `./data/history.sqlite` under the project directory and survives container recreation. Keep and back up the `data` directory.
 - The container reads host snapshots through a read-only mount. The collector runs alongside the existing UPS service.
 

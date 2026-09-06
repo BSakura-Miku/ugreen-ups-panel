@@ -32,7 +32,7 @@ npm --prefix frontend run build
 docker compose config --quiet
 ```
 
-源码 Docker 构建可使用 `docker build -t ugreen-ups-panel:dev .`，再执行 `python3 scripts/smoke-image.py --image ugreen-ups-panel:dev` 检查镜像。`compose.build.yaml` 仅供已经准备好快照和数据目录的开发环境覆盖使用。
+源码 Docker 构建可使用 `docker build -t ugreen-ups-panel:dev .`，再执行 `python3 scripts/smoke-image.py --image ugreen-ups-panel:dev` 检查镜像。`compose.build.yaml` 仅供已经准备好快照和数据目录的开发环境覆盖使用，通过 `docker compose -f docker-compose.yaml -f compose.build.yaml up -d --build` 加载。
 
 一个数据库只运行一个后端 worker。不要为测试停止 NAS 的 UPS 保护服务、解绑 USB、写入 UPS 指令或自动切换供电。需要硬件操作的兼容性问题，请把操作方案与纯软件复现分开说明。
 

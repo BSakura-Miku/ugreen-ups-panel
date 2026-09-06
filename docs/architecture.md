@@ -9,7 +9,7 @@
 | 位置 | 内容 | 运行时用途 |
 | --- | --- | --- |
 | 开发电脑上的独立仓库检出 | 前端、后端、测试、构建文件 | 开发与构建镜像；NAS 默认部署不需要编译源码或安装 Node.js |
-| NAS 上克隆仓库形成的部署目录 | `compose.yaml`、安装脚本、`data/` 及仓库文件 | Compose 直接提供默认设置，持久历史写入 `data/`，目录应放在 NAS 持久存储中 |
+| NAS 上克隆仓库形成的部署目录 | `docker-compose.yaml`、安装脚本、`data/` 及仓库文件 | Compose 直接提供默认设置，持久历史写入 `data/`，目录应放在 NAS 持久存储中 |
 | `/opt/ugreen-ups-panel/current` | 已安装的采集器版本 | systemd 运行宿主机采集器 |
 | `/etc/ugreen-ups-panel.env` | 安装器管理的采集器设置 | 自动生成并保留已有设置，普通安装无需编辑 |
 | `/run/ugreen-ups-panel/latest.json` | 最新采集快照 | 容器只读读取；不是历史数据库 |
@@ -52,7 +52,7 @@ flowchart LR
 
 FastAPI 同时提供本地静态资源与只读 API。容器没有 USB 设备挂载，也不需要 root；只读挂载快照目录，独占可写的 `/data`。Compose 将 `/data` 映射到部署目录中的 `./data`。
 
-默认 Compose 项目名固定为 `ugreen-ups-panel`。采集器安装脚本自动创建项目 `data/`，设置 UID/GID `10001:10001` 和目录权限 `0750`，保留已有数据库；用户无需手动处理目录权限。先运行安装脚本，再启动 Compose。面板直接读取镜像默认的快照与数据库路径，不需要额外的路径环境变量。
+Compose 自动读取 `docker-compose.yaml`。顶层 `name` 是可选参数，默认配置不设置；没有通过 `-p` 或 `COMPOSE_PROJECT_NAME` 指定项目名时，项目名来自部署目录名称，README 的默认部署目录为 `ugreen-ups-panel`。已有部署应保持相同目录名称，或显式沿用原项目名，避免新建另一组容器。采集器安装脚本自动创建项目 `data/`，设置 UID/GID `10001:10001` 和目录权限 `0750`，保留已有数据库；用户无需手动处理目录权限。先运行安装脚本，再启动 Compose。面板直接读取镜像默认的快照与数据库路径，不需要额外的路径环境变量。
 
 | 接口 | 用途 |
 | --- | --- |
