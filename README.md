@@ -23,7 +23,7 @@
 
 ## 安装前提
 
-- UPS 连接到 Linux NAS，宿主机具备 systemd、Python 3.10+、Git、Docker 和 Compose v2。
+- UPS 连接到 Linux NAS，宿主机具备 systemd、Python 3.10+、curl、tar、Docker 和 Compose v2 或更新版本。
 - 内核支持 usbmon，并可提供 `/dev/usbmonN`。
 - 原有 NUT/系统 UPS 驱动已连接 US3000，并持续读取完整的私有 `0x71` 报告。
 
@@ -31,28 +31,73 @@
 
 页面和 API 没有内置认证，请仅在可信局域网使用。
 
-## 安装
+## UGOS Pro 三步安装
 
-在**连接 UPS 的 Linux NAS**上，进入一个持久存储目录后执行：
+以下以 **绿联 DXP4800 Plus + 绿联 US3000 UPS + UGOS Pro** 的实测环境为例。先通过 USB 将 UPS 连接到 NAS，确认系统能够识别 UPS，并在应用中心安装 **Docker**。
+
+### 1. 启用 SSH
+
+打开【控制面板 → 终端机】，勾选 **SSH 启用**，端口默认 `22`，点击【应用】。
+
+![UGOS Pro：在控制面板的终端机页面启用 SSH](docs/assets/ugos-pro-enable-ssh.png)
+
+### 2. 连接终端，安装采集器
+
+在电脑上打开终端，用 NAS 管理员账号连接；将 `用户名`、`NAS_IP` 和端口替换为自己的设置：
 
 ```sh
-git clone https://github.com/BSakura-Miku/ugreen-ups-panel.git
-cd ugreen-ups-panel
-sudo sh scripts/install-collector.sh && docker compose up -d
+ssh 用户名@NAS_IP -p 22
 ```
 
-安装脚本会安装宿主机采集器并准备数据目录。Compose 自动拉取 [Docker Hub 镜像](https://hub.docker.com/r/bsakuramiku/ugreen-ups-panel)，无需本地构建。
+登录后执行以下**首次安装**命令。这里假设 `docker` 共享文件夹位于 `/volume1/docker`，请按实际路径修改，并确保账号有该文件夹的写入权限：
 
-打开 `http://NAS_IP:9086`，将 `NAS_IP` 替换为 NAS 的局域网地址。
+```sh
+mkdir /volume1/docker/ugreen-ups-panel &&
+curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/heads/main -o /tmp/ugreen-ups-panel.tar.gz &&
+tar -xzf /tmp/ugreen-ups-panel.tar.gz --strip-components=1 -C /volume1/docker/ugreen-ups-panel &&
+cd /volume1/docker/ugreen-ups-panel &&
+sudo sh scripts/install-collector.sh
+```
+
+出现 `Fresh UPS telemetry verified.` 表示安装成功。脚本会自动安装并启用采集器、准备 `data` 目录，无需手动修改权限；原有 UPS 服务保持运行。
+
+### 3. 创建 Docker 项目
+
+打开【Docker → 项目 → 创建项目】：
+
+- **项目名称**：`ugreen-ups-panel`
+- **存放路径**：选择第二步的同一目录，即 `共享文件夹/docker/ugreen-ups-panel`。
+- **Compose 配置**：粘贴下面内容，也可导入该目录中的 [`docker-compose.yaml`](docker-compose.yaml)。
+
+```yaml
+services:
+  panel:
+    image: bsakuramiku/ugreen-ups-panel:latest
+    restart: unless-stopped # NAS 重启后自动启动，手动停止后保持停止
+    ports:
+      - "9086:8080" # 访问 NAS_IP:9086；更换访问端口只改左侧
+    volumes:
+      # 宿主机采集器输出，只读挂载给面板
+      - /run/ugreen-ups-panel:/run/ugreen-ups-panel:ro
+      # 历史数据库保存在当前目录，更新容器时保留
+      - ./data:/data
+```
+
+勾选【创建完成后立即运行】，点击【立即部署】，等待镜像下载并启动。
+
+![UGOS Pro：创建 Docker 项目，选择目录并填写 Compose 配置](docs/assets/ugos-pro-docker-project.png)
+
+最后在浏览器打开 **`http://NAS_IP:9086`**，将 `NAS_IP` 替换为 NAS 的局域网地址。
 
 采集器只需首次安装；日常更新面板不用重新安装。
 
 ## 更新
 
-在项目目录执行：
+SSH 登录后，在项目目录执行（路径与安装时一致）：
 
 ```sh
-docker compose pull && docker compose up -d
+cd /volume1/docker/ugreen-ups-panel
+sudo docker compose pull && sudo docker compose up -d
 ```
 
 默认使用 `bsakuramiku/ugreen-ups-panel:latest`。版本变更见 [Release](https://github.com/BSakura-Miku/ugreen-ups-panel/releases)；只有说明要求更新采集器时，才更新对应脚本并重新安装。
