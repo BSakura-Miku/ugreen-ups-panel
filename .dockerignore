@@ -13,3 +13,7 @@
 !frontend/vite.config.ts
 !frontend/src/
 !frontend/src/**
+frontend/node_modules/
+frontend/dist/
+ups_panel/__pycache__/
+**/*.pyc
