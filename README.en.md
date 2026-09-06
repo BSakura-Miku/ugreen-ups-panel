@@ -83,6 +83,12 @@ NUT displaying a charge percentage does not prove that the driver reads the comp
 - [Hardware reference](docs/hardware.md) · [Validation scope](docs/validation.md) · [Changelog](CHANGELOG.md)
 - [Development and contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
-Protocol investigation started with [cktk/ugreen-ups](https://github.com/cktk/ugreen-ups). The capture interface follows the [Linux usbmon documentation](https://docs.kernel.org/usb/usbmon.html).
+## References and acknowledgments
+
+Thanks to [cktk/ugreen-ups](https://github.com/cktk/ugreen-ups) for sharing its US3000 USB HID protocol research and telemetry field documentation, which provided the starting point for this project's protocol investigation. Field decoding was then checked against captures from a DXP4800 Plus and US3000.
+
+The host capture interface follows the [Linux usbmon documentation](https://docs.kernel.org/usb/usbmon.html).
+
+## License
 
 Original source code uses the [MIT License](LICENSE). Third-party dependencies retain their own terms; see [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt). Product names, trademarks, and third-party media belong to their respective owners.

@@ -128,6 +128,12 @@ NUT 能显示电量，不一定意味着驱动会读取面板所需的完整报�
 - [硬件资料](docs/hardware.md) · [验证范围](docs/validation.md) · [更新记录](CHANGELOG.md)
 - [开发与贡献](CONTRIBUTING.md) · [安全说明](SECURITY.md)
 
-协议调查起点来自 [cktk/ugreen-ups](https://github.com/cktk/ugreen-ups)，采集接口依据 [Linux usbmon 文档](https://docs.kernel.org/usb/usbmon.html)。
+## 参考与致谢
+
+感谢 [cktk/ugreen-ups](https://github.com/cktk/ugreen-ups) 分享的 US3000 USB HID 协议研究与遥测字段说明，本项目的协议调查由此开始。后续字段解析结合了 DXP4800 Plus + US3000 的实际采集与验证。
+
+宿主机采集接口依据 [Linux usbmon 文档](https://docs.kernel.org/usb/usbmon.html)。
+
+## 许可证
 
 原创源码使用 [MIT 许可证](LICENSE)。第三方依赖保留各自许可，见 [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt)；产品名称、商标和第三方素材归各自权利人所有。
