@@ -1,0 +1,15 @@
+**
+!Dockerfile
+!requirements.lock
+!LICENSE
+!THIRD_PARTY_NOTICES.txt
+!ups_panel/
+!ups_panel/*.py
+!frontend/
+!frontend/package.json
+!frontend/package-lock.json
+!frontend/index.html
+!frontend/tsconfig.json
+!frontend/vite.config.ts
+!frontend/src/
+!frontend/src/**

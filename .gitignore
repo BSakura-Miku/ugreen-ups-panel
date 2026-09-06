@@ -1,0 +1,24 @@
+.venv/
+__pycache__/
+.pytest_cache/
+frontend/node_modules/
+frontend/dist/
+runtime/
+data/
+.env
+*.tar.gz
+dist/
+.DS_Store
+.ruff_cache/
+*.pyc
+*.sqlite*
+*.jsonl
+.env.*
+!.env.example
+# Private research, reference photographs and local calibration records.
+docs/power-investigation/
+docs/research/
+design/
+scripts/audit-power-candidates.py
+scripts/validate-power-models.py
+scripts/review-recharge.py

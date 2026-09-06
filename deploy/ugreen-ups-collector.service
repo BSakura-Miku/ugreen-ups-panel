@@ -1,0 +1,39 @@
+[Unit]
+Description=US3000 passive usbmon telemetry collector
+After=local-fs.target systemd-tmpfiles-setup.service
+StartLimitIntervalSec=120
+StartLimitBurst=10
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ugreen-ups-panel/current
+Environment=PYTHONDONTWRITEBYTECODE=1
+EnvironmentFile=-/etc/ugreen-ups-panel.env
+ExecStartPre=+/sbin/modprobe usbmon
+ExecStart=/usr/bin/python3 -m ups_panel.collector
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=5
+User=root
+UMask=0022
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_DAC_OVERRIDE
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/run/ugreen-ups-panel
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=64M
+CPUQuota=10%
+StandardOutput=journal
+StandardError=journal
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,34 @@
+name: Verify
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: python -m pip install -r requirements.lock -r requirements-dev.txt
+      - run: python -m pytest -q
+      - run: for script in scripts/*.sh; do sh -n "$script"; done
+      - run: npm ci && npm run build && npm audit
+        working-directory: frontend
+      - run: python scripts/prepare-release.py --check
+      - name: Validate the distributable source
+        run: |
+          python scripts/prepare-release.py --output "$RUNNER_TEMP/ugreen-ups-panel-release"
+          cd "$RUNNER_TEMP/ugreen-ups-panel-release"
+          sha256sum --check SOURCE_MANIFEST.sha256
+          python -m pytest -q
+          for script in scripts/*.sh; do sh -n "$script"; done
+          docker compose config --quiet
+          docker build -t ugreen-ups-panel:ci .
