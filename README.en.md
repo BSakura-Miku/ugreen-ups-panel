@@ -59,7 +59,7 @@ The default image is `bsakuramiku/ugreen-ups-panel:latest`. Check [release notes
 
 ## Configuration and data
 
-- The default port is `9086` and timezone is `Asia/Shanghai`. To change the port, timezone, or image version, edit `compose.yaml`, then run `docker compose up -d`.
+- The default port is `9086`. To change the port or image version, edit `compose.yaml`, then run `docker compose up -d`.
 - History lives in `./data/history.sqlite` under the project directory and survives container recreation. Keep and back up the `data` directory.
 - The container reads host snapshots through a read-only mount. The collector runs alongside the existing UPS service.
 

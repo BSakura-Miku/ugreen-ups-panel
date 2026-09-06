@@ -3,35 +3,11 @@ name: ugreen-ups-panel
 services:
   panel:
     image: bsakuramiku/ugreen-ups-panel:latest
-    restart: unless-stopped
+    restart: unless-stopped # NAS 重启后自动启动，手动停止后保持停止
     ports:
-      - "9086:8080"
-    environment:
-      UPS_SNAPSHOT: /capture/latest.json
-      UPS_DATABASE: /data/history.sqlite
-      TZ: Asia/Shanghai
+      - "9086:8080" # 访问 NAS_IP:9086；更换访问端口只改左侧
     volumes:
-      - type: bind
-        source: /run/ugreen-ups-panel
-        target: /capture
-        read_only: true
-        bind:
-          create_host_path: false
-      - type: bind
-        source: ./data
-        target: /data
-        bind:
-          create_host_path: false
-    read_only: true
-    tmpfs:
-      - /tmp:size=16m,mode=1777
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    mem_limit: 256m
-    cpus: 0.50
-    pids_limit: 64
-    logging:
-      driver: json-file
-      options:
-        max-size: "5m"
-        max-file: "2"
+      # 宿主机采集器输出，只读挂载给面板
+      - /run/ugreen-ups-panel:/run/ugreen-ups-panel:ro
+      # 历史数据库保存在当前目录，更新容器时保留
+      - ./data:/data

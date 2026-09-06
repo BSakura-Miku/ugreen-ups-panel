@@ -17,7 +17,7 @@
 
 Docker Desktop 可在开发电脑上构建面板镜像，但这不等于该电脑可以采集 NAS 的 USB 数据。真实采集器需要运行在连接 UPS、具备 Linux usbmon 和原 UPS 驱动的宿主机。容器通过快照文件读取数据，不通过网络自动寻找另一台 NAS。
 
-Compose 默认使用 `bsakuramiku/ugreen-ups-panel:latest`，通过 NAS 的 `9086` 端口提供页面，不需要项目 `.env` 文件。日常升级执行 `docker compose pull && docker compose up -d`。端口、时区或指定版本可直接修改 Compose；只有采集器变更时，才需要更新其源文件并重新运行安装脚本。
+Compose 默认使用 `bsakuramiku/ugreen-ups-panel:latest`，通过 NAS 的 `9086` 端口提供页面，不需要项目 `.env` 文件。日常升级执行 `docker compose pull && docker compose up -d`。端口或指定版本可直接修改 Compose；只有采集器变更时，才需要更新其源文件并重新运行安装脚本。
 
 ```mermaid
 flowchart LR
@@ -52,7 +52,7 @@ flowchart LR
 
 FastAPI 同时提供本地静态资源与只读 API。容器没有 USB 设备挂载，也不需要 root；只读挂载快照目录，独占可写的 `/data`。Compose 将 `/data` 映射到部署目录中的 `./data`。
 
-默认 Compose 项目名固定为 `ugreen-ups-panel`。采集器安装脚本自动创建项目 `data/`，设置 UID/GID `10001:10001` 和目录权限 `0750`，保留已有数据库；用户无需手动处理目录权限。Compose 要求挂载目录已经存在，防止遗漏安装步骤时创建不正确的空目录。
+默认 Compose 项目名固定为 `ugreen-ups-panel`。采集器安装脚本自动创建项目 `data/`，设置 UID/GID `10001:10001` 和目录权限 `0750`，保留已有数据库；用户无需手动处理目录权限。先运行安装脚本，再启动 Compose。面板直接读取镜像默认的快照与数据库路径，不需要额外的路径环境变量。
 
 | 接口 | 用途 |
 | --- | --- |

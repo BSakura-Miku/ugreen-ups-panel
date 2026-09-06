@@ -59,7 +59,7 @@ docker compose pull && docker compose up -d
 
 ## 配置与数据
 
-- 默认访问端口为 `9086`，时区为 `Asia/Shanghai`。需要更改端口、时区或镜像版本时，直接编辑 `compose.yaml`，再运行 `docker compose up -d`。
+- 默认访问端口为 `9086`。需要更改端口或镜像版本时，直接编辑 `compose.yaml`，再运行 `docker compose up -d`。
 - 历史数据库保存在项目目录的 `./data/history.sqlite`，重建容器会保留历史。请保留并备份 `data` 目录。
 - 容器只读访问宿主机采集快照；采集器与原有 UPS 服务同时运行。
 

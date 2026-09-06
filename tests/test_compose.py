@@ -50,13 +50,11 @@ def test_production_compose_uses_prebuilt_image_and_protected_bind_mounts(tmp_pa
     assert panel['ports'][0].get('host_ip', '0.0.0.0') == '0.0.0.0'
     assert str(panel['ports'][0]['published']) == '9086'
     mounts = {entry['target']: entry for entry in panel['volumes']}
-    assert mounts['/capture']['read_only'] is True
-    assert mounts['/capture']['source'] == '/run/ugreen-ups-panel'
+    assert mounts['/run/ugreen-ups-panel']['read_only'] is True
+    assert mounts['/run/ugreen-ups-panel']['source'] == '/run/ugreen-ups-panel'
     assert mounts['/data']['source'] == str(tmp_path / 'data')
-    assert mounts['/data']['type'] == mounts['/capture']['type'] == 'bind'
-    assert mounts['/data'].get('bind', {}).get('create_host_path', False) is False
-    assert mounts['/capture'].get('bind', {}).get('create_host_path', False) is False
-    assert panel['read_only'] is True and panel['cap_drop'] == ['ALL']
+    assert mounts['/data']['type'] == mounts['/run/ugreen-ups-panel']['type'] == 'bind'
+    assert not panel.get('environment')
     assert not panel.get('privileged') and not panel.get('devices')
     assert not (tmp_path / 'data').exists()
 
@@ -68,7 +66,7 @@ def test_old_env_variables_do_not_change_the_simple_compose_defaults(tmp_path):
     panel = compose_config(tmp_path, ['compose.yaml'])['services']['panel']
     assert panel['image'] == 'bsakuramiku/ugreen-ups-panel:latest'
     assert str(panel['ports'][0]['published']) == '9086'
-    assert panel['environment']['TZ'] == 'Asia/Shanghai'
+    assert not panel.get('environment')
     data = next(mount for mount in panel['volumes'] if mount['target'] == '/data')
     assert data['source'] == str(tmp_path / 'data')
 
