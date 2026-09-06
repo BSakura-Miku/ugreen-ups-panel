@@ -104,6 +104,58 @@ main:focus{outline:none}
 .calibration-editor .notice{margin:20px 0 0}
 .calibration-formulas p{font-size:14px;line-height:1.9;color:#c6d1bf;overflow-wrap:anywhere}
 .calibration-formulas .muted{font-size:12px;color:var(--muted)}
+.calibration-source{display:block;color:#9fb591;font-size:11px;line-height:1.8;margin-top:8px;overflow-wrap:anywhere}
+.calibration-fill-notice{font-size:13px;line-height:1.8;color:#c6f19a;border:1px solid #485c3c;background:#263322;border-radius:8px;padding:13px 16px}
+.calibration-voltage{margin:22px 0;padding:17px;background:#151e1b;border:1px solid #3e5037;border-radius:9px;min-width:0}
+.calibration-voltage>label{display:block;font-size:13px;color:#d2dfc9;margin-bottom:10px}
+.calibration-voltage-controls{display:flex;align-items:center;flex-wrap:wrap;gap:10px}
+.calibration-voltage select{color:#eaf0e8;background:#111818;border:1px solid #4d6050;border-radius:7px;min-height:44px;font:inherit;font-size:14px;padding:10px 12px;min-width:0;max-width:100%;width:190px}
+.calibration-voltage .muted{font-size:12px;line-height:1.8;margin:11px 0 0}
+.calibration-assistant-intro{font-size:13px;color:#bfcdb5;line-height:1.9;margin:20px 0}
+.calibration-steps{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin-top:24px}
+.calibration-step{min-width:0;border:1px solid #3c4c35;border-radius:10px;background:#19221d;padding:22px}
+.calibration-step-title{display:flex;align-items:flex-start;gap:12px}
+.calibration-step-title>span{display:flex;align-items:center;justify-content:center;width:28px;height:28px;flex-shrink:0;border:1px solid #5a7944;border-radius:50%;background:#2c3d24;color:#d2efa7;font-size:13px}
+.calibration-step h4,.calibration-preview h4{font-size:15px;font-weight:500;margin:3px 0 7px;color:#e2eadc}
+.calibration-step h4 small{font-size:11px;color:#a9b79e;font-weight:400;margin-left:7px}
+.calibration-step-title p{font-size:12px;color:#a6b49c;margin:0;line-height:1.8}
+.calibration-step-description{font-size:12px;color:#b7c5af;line-height:1.9;min-height:46px;margin:18px 0 15px}
+.calibration-step>.muted{font-size:11px;line-height:1.8;margin:13px 0 0}
+.calibration-sampling{margin-top:18px;padding:14px;background:#111a16;border-radius:7px;border:1px solid #3a4932;min-width:0}
+.calibration-progress-label{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;font-size:11px;line-height:1.7;color:#bed5ac}
+.calibration-progress-label strong{font-weight:400;font-variant-numeric:tabular-nums;color:#cfddc6}
+.calibration-sampling progress{display:block;appearance:none;width:100%;height:4px;border:0;border-radius:3px;margin:12px 0;background:#33412f;overflow:hidden;accent-color:var(--lime)}
+.calibration-sampling progress::-webkit-progress-bar{background:#33412f}
+.calibration-sampling progress::-webkit-progress-value{background:var(--lime);border-radius:3px}
+.calibration-sampling progress::-moz-progress-bar{background:var(--lime);border-radius:3px}
+.calibration-sampling.rejected{border-color:#765334}
+.calibration-sampling .muted{font-size:11px;line-height:1.8;margin:10px 0 0}
+.calibration-window p{font-size:11px;line-height:1.8;color:#aebfa1;margin:5px 0;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.calibration-meter-field{margin-top:21px;min-width:0}
+.calibration-meter-field label{display:block;font-size:12px;color:#d0ddc6;line-height:1.8;margin-bottom:8px}
+.calibration-meter-field input{width:100%;min-width:0;max-width:100%;min-height:44px;color:#eaf0e8;background:#111818;border:1px solid #4d6050;border-radius:7px;font:inherit;font-size:15px;font-variant-numeric:tabular-nums;padding:10px 12px}
+.calibration-meter-field input:disabled{opacity:.5}
+.calibration-meter-field input:focus-visible,.calibration-voltage select:focus-visible{outline:2px solid var(--lime);outline-offset:3px}
+.calibration-step-formula{font-size:11px;color:#98af8a;line-height:1.9;margin:12px 0 0;overflow-wrap:anywhere}
+.calibration-result-error{font-size:12px;color:#efc08e;line-height:1.8;margin:12px 0 0;overflow-wrap:anywhere}
+.calibration-calculated{font-size:12px;color:#b9c9ad;display:flex;align-items:baseline;gap:14px;margin:17px 0 0}
+.calibration-calculated strong{font-size:24px;font-weight:500;line-height:1.5;font-variant-numeric:tabular-nums;color:var(--lime);overflow-wrap:anywhere}
+.calibration-existing-base{border-top:1px solid #3b4b34;margin-top:20px;padding-top:15px}
+.calibration-existing-base p{font-size:11px;line-height:1.9;color:#b4c6a7;margin:0 0 13px;overflow-wrap:anywhere}
+.calibration-existing-base strong{font-weight:500;font-variant-numeric:tabular-nums}
+.calibration-preview{margin-top:22px;border:1px solid #506b3e;border-radius:10px;background:#23301f;padding:22px}
+.calibration-preview>.muted{font-size:12px;line-height:1.9}
+.calibration-preview-rows{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin:23px 0}
+.calibration-preview-rows>div{min-width:0}
+.calibration-preview-rows>div>span{font-size:12px;color:#bacdaf}
+.calibration-preview-change{display:flex;align-items:center;gap:10px;margin-top:11px;font-size:17px;font-variant-numeric:tabular-nums;flex-wrap:wrap;overflow-wrap:anywhere}
+.calibration-preview-change>span{color:#a6b79b;font-size:14px}
+.calibration-preview-change>svg{transform:rotate(-90deg);flex-shrink:0;color:#819a70}
+.calibration-preview-change>strong{font-weight:500;color:#d3f2af}
+.calibration-preview-rows small{display:block;font-size:10px;color:#a7be98;line-height:1.8;margin-top:8px;overflow-wrap:anywhere}
+.calibration-assistant-footnote{font-size:11px;line-height:1.9;color:#a3b497;margin:20px 0 0}
+@media(max-width:1150px){.calibration-steps{grid-template-columns:1fr}.calibration-step-description{min-height:0}}
+@media(max-width:760px){.calibration-preview-rows{grid-template-columns:1fr;gap:17px}.calibration-preview-rows>div{padding-bottom:15px;border-bottom:1px solid #405535}.calibration-preview-rows>div:last-child{padding-bottom:0;border:0}.calibration-step,.calibration-preview{padding:17px}.calibration-voltage-controls>*{flex:1 1 auto}.calibration-step>.calibration-secondary,.calibration-preview>.calibration-primary{width:100%}}
 @media(max-width:1050px){.calibration-inputs{grid-template-columns:1fr}.calibration-values{gap:14px}.calibration-values dd{font-size:17px}}
 @media(max-width:560px){
   .sidebar{height:108px;display:block;padding:8px 14px}

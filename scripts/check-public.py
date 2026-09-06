@@ -23,7 +23,7 @@ FILES = (
     'frontend/src/assets/apple-touch-icon.png',
 )
 GLOBS = ('ups_panel/*.py', 'tests/test_*.py', 'fixtures/*.hex', 'frontend/src/**/*.ts',
-         'frontend/src/**/*.tsx', 'frontend/src/**/*.css')
+         'frontend/src/**/*.tsx', 'frontend/src/**/*.css', 'frontend/tests/*.test.mjs')
 PATTERNS = (
     re.compile(r'/(?:Users|home)/[A-Za-z0-9_.-]+/'),
     re.compile(r'\b10\.10\.2\.\d+\b'),

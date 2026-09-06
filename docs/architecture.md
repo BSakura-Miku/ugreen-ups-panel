@@ -18,7 +18,7 @@
 
 Docker Desktop 可在开发电脑上构建面板镜像，但这不等于该电脑可以采集 NAS 的 USB 数据。真实采集器需要运行在连接 UPS、具备 Linux usbmon 和原 UPS 驱动的宿主机。容器通过快照文件读取数据，不通过网络自动寻找另一台 NAS。
 
-Compose 默认使用 `bsakuramiku/ugreen-ups-panel:latest`，通过 NAS 的 `9086` 端口提供页面，不需要项目 `.env` 文件。日常升级执行 `docker compose pull && docker compose up -d`。v0.5.0 只更新面板，现有 v0.4.0 宿主机采集器无需重装。端口或指定版本可直接修改 Compose；只有采集器变更时，才需要更新其源文件并重新运行安装脚本。v0.4.0 需要旧用户更新一次采集器；源码可在临时目录中下载、安装后清理，通过 `--data-dir` 指向原部署目录的 `data`，无需把源码留在 NAS 运行目录。
+Compose 默认使用 `bsakuramiku/ugreen-ups-panel:latest`，通过 NAS 的 `9086` 端口提供页面，不需要项目 `.env` 文件。**v0.6.0 需要先更新宿主机采集器，再更新面板容器。** 从临时目录安装时通过 `--data-dir` 沿用原数据目录，保留校准文件和历史；源码无需长期留在 NAS 运行目录。仅面板变更的后续版本仍可执行 `docker compose pull && docker compose up -d`，具体以发布说明为准。
 
 ```mermaid
 flowchart LR
@@ -47,7 +47,11 @@ flowchart LR
 
 `protocol.py` 负责完整报告解析、字段有效性、未知模式与候选量；`power.py` 负责显式选择的经验模型。每份新报告进入模型一次，缺失或不适用值保留为空。
 
-校准文件支持 `none`、`local-19v-v1` 与 `custom`，默认 `none`。文件包含 schema 版本 `1`、`profile` 和 `coefficients`（`base_gain`、`charge_gain`、`battery_gain`）；`revision` 由规范化的配置内容派生，相同配置重复保存不会生成新版本。采集器通过 `--calibration-config` 或 `UPS_CALIBRATION_CONFIG` 读取文件；合法文件优先于原有 `UPS_CALIBRATION_PROFILE`，没有文件时使用原有配置，非法文件保留最后有效配置并报告错误。安装器负责连接实际数据目录与采集器设置，普通用户无需编辑服务环境文件。
+校准文件支持 `none`、`local-19v-v1` 与 `custom`，默认 `none`。schema 1 保留原有结构、内容哈希和 18–20 V 输入规则。schema 2 只用于 `custom`，新增 `ac_voltage_nominal_v`（12、19 或 20）；`coefficients.base_gain` 必填，`charge_gain`、`battery_gain` 可为 `null`。新版自定义交流估算按适配器输入与标称值相差不超过 1 V 判断适用性；缺少系数的计算分支不提供估算。
+
+`revision` 由规范化的完整配置派生，包括新版标称电压；相同配置重复保存不会生成新版本。新自定义模型标识不再固定为 19 V。电压进入历史的校准身份，旧记录和原始量不重写。采集器通过 `--calibration-config` 或 `UPS_CALIBRATION_CONFIG` 读取文件；合法文件优先于 `UPS_CALIBRATION_PROFILE`，没有文件时使用原有配置，非法文件保留最后有效配置并报告错误。安装器负责连接实际数据目录与采集器设置。
+
+分步助手只读适配器输入和相关原始字段，不使用 UPS 输出电压推断适配器标称值。在线未充电窗口以 `W / mean(B)` 求基底；充电窗口以 `(W − a × mean(B)) / mean(C)` 求回充补偿，采用本充电窗口的均值。每窗 30 秒、至少 12 个去重样本，相关原值的 `(max−min)/mean` 超过 10% 或采集不连续时重采，`mean(C)<2 W` 不求回充系数。完成窗口冻结，用户手工输入同期交流瓦数；助手不调用 HA 或任何供电控制接口。详细规则见[校准说明](calibration.md)。
 
 面板保存成功仅说明配置已经落盘。生效状态还要检查新鲜采集快照是否报告相同的校准版本；旧采集器、断连或过期快照都不能确认生效。配置变更后重新建立 8 秒估算窗口，原始字段不受系数影响。`custom` 始终未独立验证，输入上限不代表精度或适用范围。
 
@@ -71,6 +75,8 @@ Compose 自动读取 `docker-compose.yaml`。顶层 `name` 是可选参数，默
 | `GET /api/events` | 最近的供电和连接事件 |
 | `GET /api/battery-sessions?days=90&limit=50` | 电池供电明细与范围统计；最多 365 天、每次最多返回 500 条 |
 | `GET /api/export.csv?hours=24` | 与历史查询范围对应的均值、极值及模型身份导出 |
+
+校准仍使用 `GET/PUT /api/calibration`。新版页面发送 `X-UPS-Calibration-Version: 2`；响应提供 `supported_config_schemas`，采集器快照也声明支持 schema 1、2。新版 `custom` 的 PUT 在原 `profile`、`coefficients`、`expected_revision` 外增加 `ac_voltage_nominal_v`，请求体不传 `schema`。服务端同时检查页面和采集器能力：旧页面不能覆盖 schema 2 配置，会提示刷新；旧采集器需先升级，不能接受新版配置。
 
 ### 分层历史
 
@@ -126,5 +132,7 @@ docker compose cp panel:/data/backup.sqlite ./backup.sqlite
 ```
 
 恢复备份时先停止 `panel`，保留当前数据库副本，再替换 `data/history.sqlite`，移走对应旧 WAL/SHM 文件并确认数据库属于 `10001:10001` 后启动。不同版本间恢复前需核对数据库兼容性，不能在面板仍写入时替换数据库。
+
+回滚到旧采集器时，schema 2 校准文件也需要恢复为适用的兼容 schema 1 配置或 `none`。先备份当前配置，再按[校准回滚说明](calibration.md#升级与回滚)处理；保留已有历史，不通过删除数据库解决配置版本问题。
 
 卸载使用 `docker compose down` 和 `sudo sh scripts/uninstall-collector.sh`。这两步保留历史数据，采集器卸载脚本不管理原 UPS/NUT 服务。

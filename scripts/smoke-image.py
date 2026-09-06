@@ -198,6 +198,74 @@ for mode in ('online', 'charging', 'battery'):
     assert sample['calibration_profile'] == 'none'
     assert sample['ac_input_estimate_w'] is None and sample['battery_energy_estimate_w'] is None
     assert sample['ac_estimate_quality'] == sample['battery_estimate_quality'] == 'not_configured'
+    assert 'calibration_schema' not in sample and 'ac_voltage_nominal_v' not in sample
+
+def check_v2_calibration(directory):
+    # Use the image's installed code with a separate disposable config. This does
+    # not start USB/NUT collection or change the running API's default-none test.
+    import copy
+    import json
+    from pathlib import Path
+    import tempfile
+    from ups_panel.app import load_snapshot
+    from ups_panel.calibration import load_config, normalize_config, save_config
+    from ups_panel.collector import CalibrationState
+    from ups_panel.power import PowerEstimator
+
+    def raw_sample(timestamp, mode='online', voltage=12):
+        return {'timestamp': timestamp, 'mode': mode, 'soc': 98,
+                'battery_voltage': 16.4, 'cells': [4.1, 4.1, 4.1, 4.1],
+                'input_voltage': voltage, 'adapter_input_voltage_v': voltage,
+                'raw_fields': {'byte_28': 50},
+                'battery_charge_power_candidate_w': 8 if mode == 'charging' else None,
+                'battery_discharge_power_candidate_w': 30 if mode == 'battery' else None}
+
+    config = normalize_config({'schema': 2, 'profile': 'custom', 'ac_voltage_nominal_v': 12.0,
+                               'coefficients': {'base_gain': 1.25, 'charge_gain': None, 'battery_gain': None}})
+    assert type(config['ac_voltage_nominal_v']) is int, 'Nominal voltage was not canonicalized'
+    with tempfile.TemporaryDirectory(prefix='.smoke-calibration-', dir=directory) as temporary:
+        path = Path(temporary) / 'calibration.json'
+        assert save_config(path, config) == load_config(path) == config
+        assert path.stat().st_mode & 0o777 == 0o640, 'Calibration file permissions changed'
+        state = CalibrationState(path)
+        assert state.snapshot()['supported_config_schemas'] == [1, 2], 'Collector capability missing'
+        assert state.snapshot()['configurable'] and state.refresh(now=99)
+        for timestamp in (100, 102, 104, 106):
+            raw = raw_sample(timestamp)
+            before = copy.deepcopy(raw)
+            sample = state.update(raw)
+            assert all(sample[key] == value for key, value in before.items()), 'Calibration changed raw values'
+        assert sample['ac_input_estimate_w'] == 62.5, '12 V partial calibration did not estimate online power'
+        assert sample['ac_estimate_quality'] == 'custom_unverified'
+        assert sample['calibration_schema'] == 2 and sample['ac_voltage_nominal_v'] == 12
+        assert sample['calibration_coefficients'] == config['coefficients']
+        assert sample['ac_estimate_model'] == 'us3000_custom_v2_' + config['revision']
+        assert state.update(raw_sample(106))['ac_input_estimate_w'] == 62.5, 'Duplicate cache failed'
+
+        # Exercise the image API's real snapshot validator with nullable v2 gains.
+        snapshot_path = Path(temporary) / 'latest.json'
+        snapshot_path.write_text(json.dumps({'schema': 1, 'heartbeat': 106, 'sample': sample,
+                                             'calibration': state.snapshot()}))
+        loaded = load_snapshot(snapshot_path, now=107)
+        assert loaded['fresh'] and loaded['sample']['calibration_revision'] == config['revision']
+        assert loaded['sample']['calibration_coefficients']['charge_gain'] is None
+        assert loaded['sample']['calibration_coefficients']['battery_gain'] is None
+
+        for timestamp, mode, quality_field, quality in (
+                (108, 'charging', 'ac_estimate_quality', 'charge_not_configured'),
+                (110, 'battery', 'battery_estimate_quality', 'battery_not_configured')):
+            raw = raw_sample(timestamp, mode)
+            before = copy.deepcopy(raw)
+            sample = state.update(raw)
+            assert sample['ac_input_estimate_w'] is None and sample['battery_energy_estimate_w'] is None
+            assert sample[quality_field] == quality, 'Unconfigured gain silently borrowed a default'
+            assert all(sample[key] == value for key, value in before.items()), 'Partial calibration changed raw values'
+        assert state.update(raw_sample(112, voltage=19))['ac_estimate_quality'] == 'unsupported_voltage'
+        legacy = PowerEstimator('local-19v-v1').update(raw_sample(114))
+        assert legacy['ac_input_estimate_w'] is None and legacy['ac_estimate_quality'] == 'unsupported_voltage'
+    return {'partial_calibration_12v': 'passed', 'collector_config_schemas': [1, 2]}
+
+calibration_checks = check_v2_calibration('/data')
 
 class Assets(HTMLParser):
     def __init__(self):
@@ -268,7 +336,7 @@ else:
 print(json.dumps({'uid': os.getuid(), 'machine': platform.machine(),
                   'assets': len(assets.paths), 'sqlite_rows': rows,
                   'history_points': len(history['points']), 'csv_rows': len(csv_rows),
-                  'calibration_profile': 'none', 'checks': 'passed'}))
+                  'calibration_profile': 'none', **calibration_checks, 'checks': 'passed'}))
 '''
 
 

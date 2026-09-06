@@ -18,6 +18,7 @@ ESTIMATE_FIELDS = (
     'ac_input_estimate_w', 'ac_estimate_quality', 'ac_estimate_model',
     'ac_estimate_window_sec', 'calibration_profile', 'calibration_verified',
     'calibration_revision', 'calibration_coefficients',
+    'calibration_schema', 'ac_voltage_nominal_v',
 )
 
 
@@ -45,12 +46,13 @@ class PowerEstimator:
         if finite_number(sample.get('timestamp')):
             self.last_ts = sample['timestamp']
             self.last_estimate = {k: dict(result[k]) if isinstance(result[k], dict) else result[k]
-                                  for k in ESTIMATE_FIELDS}
+                                  for k in ESTIMATE_FIELDS if k in result}
         return result
 
     def _update(self, sample):
         enabled = self.profile != 'none'
         custom = self.profile == 'custom'
+        voltage_scoped = self.config['schema'] == 2
         revision = self.config['revision']
         sample.update(
             battery_energy_estimate_w=None,
@@ -59,13 +61,21 @@ class PowerEstimator:
             battery_estimate_quality='unavailable' if enabled else 'not_configured',
             ac_input_estimate_w=None,
             ac_estimate_quality='unavailable' if enabled else 'not_configured',
-            ac_estimate_model=(f'us3000_19v_custom_{revision}' if custom else
+            ac_estimate_model=(f'us3000_custom_v2_{revision}' if voltage_scoped else
+                               f'us3000_19v_custom_{revision}' if custom else
                                'us3000_19v_v1' if enabled else None),
             ac_estimate_window_sec=8, calibration_profile=self.profile,
             calibration_revision=revision,
             calibration_coefficients=dict(self.coefficients) if enabled else None,
             calibration_verified=False,
         )
+        if voltage_scoped:
+            sample.update(calibration_schema=2, ac_voltage_nominal_v=self.config['ac_voltage_nominal_v'])
+        else:
+            # These are estimate metadata, not raw channels. Never retain them
+            # when a previously processed sample is passed to a legacy model.
+            sample.pop('calibration_schema', None)
+            sample.pop('ac_voltage_nominal_v', None)
         ts, mode = sample.get('timestamp'), sample.get('mode')
         if not finite_number(ts):
             self.window.clear()
@@ -84,6 +94,10 @@ class PowerEstimator:
         if not enabled:
             return sample
         if mode == 'battery':
+            if self.coefficients['battery_gain'] is None:
+                self.window.clear()
+                sample['battery_estimate_quality'] = 'battery_not_configured'
+                return sample
             raw = sample.get('battery_discharge_power_candidate_w')
             if not finite_number(raw) or raw <= 0:
                 self.window.clear()
@@ -98,8 +112,14 @@ class PowerEstimator:
         if mode not in ('online', 'charging'):
             self.window.clear()
             return sample
+        if mode == 'charging' and self.coefficients['charge_gain'] is None:
+            self.window.clear()
+            sample['ac_estimate_quality'] = 'charge_not_configured'
+            return sample
         vin = sample.get('input_voltage')
-        if not finite_number(vin) or not 18 <= vin <= 20:
+        lower, upper = ((self.config['ac_voltage_nominal_v'] - 1, self.config['ac_voltage_nominal_v'] + 1)
+                        if voltage_scoped else (18, 20))
+        if not finite_number(vin) or not lower <= vin <= upper:
             self.window.clear()
             sample['ac_estimate_quality'] = 'unsupported_voltage'
             return sample
@@ -112,7 +132,7 @@ class PowerEstimator:
             sample['ac_estimate_quality'] = 'invalid_data'
             return sample
         estimate = self._smooth(ts, raw * self.coefficients['base_gain'] +
-                               charge * self.coefficients['charge_gain'])
+                               charge * (self.coefficients['charge_gain'] if mode == 'charging' else 0))
         if estimate is None:
             sample['ac_estimate_quality'] = 'warming_up'
             return sample

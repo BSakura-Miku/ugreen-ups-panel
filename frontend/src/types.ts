@@ -68,20 +68,75 @@ export type BatterySessions = {
   has_more: boolean;
 };
 
+export type CalibrationVoltage = 12 | 19 | 20;
 export type CalibrationProfile = 'none' | 'local-19v-v1' | 'custom';
-export type CalibrationCoefficients = { base_gain: number; charge_gain: number; battery_gain: number };
+export type CalibrationLegacyCoefficients = { base_gain: number; charge_gain: number; battery_gain: number };
+export type CalibrationCoefficients = { base_gain: number; charge_gain: number | null; battery_gain: number | null };
 export type CalibrationConfig = {
   schema: 1;
   profile: CalibrationProfile;
-  coefficients: CalibrationCoefficients | null;
+  coefficients: CalibrationLegacyCoefficients | null;
+  revision: string;
+} | {
+  schema: 2;
+  profile: 'custom';
+  ac_voltage_nominal_v: CalibrationVoltage;
+  coefficients: CalibrationCoefficients;
   revision: string;
 };
 export type CalibrationState = {
   schema: 1;
-  defaults: CalibrationCoefficients;
+  defaults: CalibrationLegacyCoefficients;
+  supported_config_schemas?: number[];
   desired: CalibrationConfig;
   active: CalibrationConfig | null;
   collector_ready: boolean;
   pending: boolean;
   error: string | null;
+};
+
+export type Sample = {
+  calibration_profile?: string;
+  calibration_schema?: number;
+  calibration_revision?: string;
+  calibration_coefficients?: CalibrationCoefficients | null;
+  ac_voltage_nominal_v?: CalibrationVoltage;
+  decoder_version?: number;
+  formula_version?: number;
+  adapter_input_voltage_v?: number | null;
+  battery_energy_estimate_w?: number | null;
+  battery_estimate_quality?: string;
+  ac_input_estimate_w?: number | null;
+  ac_estimate_quality?: string;
+  battery_charge_current_candidate_a?: number | null;
+  battery_discharge_current_candidate_a?: number | null;
+  battery_charge_power_candidate_w?: number | null;
+  battery_discharge_power_candidate_w?: number | null;
+  timestamp: number;
+  mode: string;
+  soc: number;
+  input_voltage: number | null;
+  output_voltage: number | null;
+  current: number | null;
+  current_kind: string;
+  power_w: number | null;
+  dc_power_estimate_w?: number | null;
+  battery_voltage: number;
+  cells: number[];
+  cell_delta_mv: number;
+  runtime_sec: number | null;
+  load_percent: number | null;
+  warnings: string[];
+  raw_fields?: { be_u16: Record<string, number>; byte_26?: number; byte_27?: number; byte_28: number; frame_hex: string };
+};
+export type LiveView = {
+  calibration?: { config: CalibrationConfig | null; configurable: boolean; error: string | null };
+  fresh: boolean;
+  source: string;
+  age_sec: number | null;
+  sample: Sample | null;
+  device?: { serial?: string; bus?: number; device?: number; address?: number; vendor?: string; product?: string; path?: string } | null;
+  nut?: { fresh: boolean; values?: Record<string, string> };
+  diagnostics?: { frames?: number; dropped?: number; rejected?: number; error?: string };
+  storage_error?: string | null;
 };

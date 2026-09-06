@@ -21,7 +21,7 @@ jobs:
       - run: python scripts/check-public.py --require-git
       - run: python -m pytest -q
       - run: for script in scripts/*.sh; do sh -n "$script"; done
-      - run: npm ci && npm run build && npm audit
+      - run: npm ci && npm test && npm run build && npm audit
         working-directory: frontend
       - name: Validate Compose and the dashboard image
         run: |

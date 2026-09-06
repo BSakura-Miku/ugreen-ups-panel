@@ -10,7 +10,7 @@ import tempfile
 import time
 
 from .protocol import parse_frame
-from .calibration import CalibrationError, default_config, load_config
+from .calibration import CalibrationError, SUPPORTED_CONFIG_SCHEMAS, default_config, load_config
 from .power import CALIBRATION_PROFILES, PowerEstimator
 from .usbmon import Reader, decode_event, discover
 
@@ -87,7 +87,8 @@ class CalibrationState:
         return result
 
     def snapshot(self):
-        return {'config': self.config, 'configurable': bool(self.path), 'error': self.error}
+        return {'config': self.config, 'configurable': bool(self.path), 'error': self.error,
+                'supported_config_schemas': list(SUPPORTED_CONFIG_SCHEMAS)}
 
 
 def run(output, serial='', duration=0, replay=None, nut='ups0@localhost', calibration_profile='none',

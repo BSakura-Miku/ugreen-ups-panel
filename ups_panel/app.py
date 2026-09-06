@@ -56,14 +56,20 @@ def load_snapshot(path, now=None):
             for key in ('formula_version', 'decoder_version'):
                 if key in sample and (type(sample[key]) is not int or sample[key] < 1):
                     raise ValueError('Invalid sample version')
-            for key in set(CONTEXT_FIELDS) - {'formula_version', 'decoder_version', 'calibration_coefficients'}:
+            for key in set(CONTEXT_FIELDS) - {'formula_version', 'decoder_version', 'calibration_coefficients',
+                                            'calibration_schema', 'ac_voltage_nominal_v'}:
                 if sample.get(key) is not None and (not isinstance(sample[key], str) or len(sample[key]) > 128):
                     raise ValueError('Invalid calibration metadata')
             if 'calibration_coefficients' in sample:
-                config = normalize_config({'schema': 1, 'profile': sample.get('calibration_profile'),
-                                           'coefficients': sample['calibration_coefficients']})
+                config_data = {'schema': sample.get('calibration_schema', 1), 'profile': sample.get('calibration_profile'),
+                               'coefficients': sample['calibration_coefficients']}
+                if 'ac_voltage_nominal_v' in sample:
+                    config_data['ac_voltage_nominal_v'] = sample['ac_voltage_nominal_v']
+                config = normalize_config(config_data)
                 if sample.get('calibration_revision') != config['revision']:
                     raise ValueError('Calibration revision does not match coefficients')
+            elif 'calibration_schema' in sample or 'ac_voltage_nominal_v' in sample:
+                raise ValueError('Versioned calibration metadata requires its coefficients')
             if (not isinstance(sample.get('warnings', []), list)
                     or any(not isinstance(warning, str) for warning in sample.get('warnings', []))):
                 raise ValueError('Invalid warnings')
@@ -170,14 +176,31 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
             error = '采集器未能读取新配置，仍保留上一次有效配置。'
         ready = bool(view['fresh'] and metadata.get('configurable') is True and active
                      and (view.get('sample') or {}).get('calibration_revision') == active['revision'])
+        supported = metadata.get('supported_config_schemas', [1])
+        if (not isinstance(supported, list) or not supported
+                or any(type(version) is not int or version not in (1, 2) for version in supported)):
+            supported = [1]
         return {'schema': 1, 'defaults': DEFAULT_COEFFICIENTS, 'desired': desired,
                 'active': active, 'collector_ready': ready,
+                'supported_config_schemas': sorted(set(supported)),
                 'pending': active is None or desired['revision'] != active['revision'],
                 'error': error}
 
+    def client_config_version(request):
+        version = request.headers.get('x-ups-calibration-version', '1')
+        if version not in ('1', '2'):
+            raise HTTPException(400, '校准页面版本不受支持，请刷新页面后重试。')
+        return int(version)
+
+    def require_compatible_client(status, version):
+        if any(config and config['schema'] > version for config in (status['desired'], status['active'])):
+            raise HTTPException(409, '校准配置已升级，请刷新页面后再查看或修改，原配置已保留。')
+
     @app.get('/api/calibration')
-    def get_calibration():
-        return calibration_status()
+    def get_calibration(request: Request):
+        status = calibration_status()
+        require_compatible_client(status, client_config_version(request))
+        return status
 
     @app.put('/api/calibration')
     async def put_calibration(request: Request):
@@ -202,6 +225,7 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
                 raise HTTPException(403, '不允许跨站修改校准配置。')
         if request.headers.get('sec-fetch-site') in ('cross-site', 'same-site'):
             raise HTTPException(403, '请从当前面板页面保存配置。')
+        client_version = client_config_version(request)
         encoded = bytearray()
         async for part in request.stream():
             encoded.extend(part)
@@ -209,18 +233,30 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
                 raise HTTPException(413, '校准配置过大。')
         try:
             payload = json.loads(encoded)
-            if not isinstance(payload, dict) or set(payload) != {'profile', 'coefficients', 'expected_revision'}:
+            required_fields = {'profile', 'coefficients', 'expected_revision'}
+            if (not isinstance(payload, dict)
+                    or set(payload) not in (required_fields, required_fields | {'ac_voltage_nominal_v'})):
                 raise CalibrationError('Invalid calibration request')
             if not isinstance(payload['expected_revision'], str):
                 raise CalibrationError('Invalid revision')
-            config = normalize_config({'schema': 1, 'profile': payload['profile'],
-                                       'coefficients': payload['coefficients']})
+            schema = 2 if 'ac_voltage_nominal_v' in payload else 1
+            if schema > client_version:
+                raise HTTPException(409, '请刷新功率校准页面后再保存新版配置。')
+            config_data = {'schema': schema, 'profile': payload['profile'], 'coefficients': payload['coefficients']}
+            if schema == 2:
+                config_data['ac_voltage_nominal_v'] = payload['ac_voltage_nominal_v']
+            config = normalize_config(config_data)
         except (ValueError, TypeError, RecursionError, OverflowError):
-            raise HTTPException(400, '校准配置无效：交流基底和电池放电系数须大于 0 且不超过 10，回充补偿须在 0–10 之间。') from None
+            raise HTTPException(400, '校准配置无效：交流基底须大于 0 且不超过 10；回充补偿须在 0–10 之间，电池放电须大于 0 且不超过 10。新版自定义配置可将后两项留空，电压档位须为 12、19 或 20 V。') from None
         async with calibration_lock:
             current = calibration_status()
+            require_compatible_client(current, client_version)
             if not current['collector_ready']:
                 raise HTTPException(503, '需要已更新并正常采集的宿主机采集器，请等待连接或更新采集器。')
+            if config['schema'] not in current['supported_config_schemas']:
+                raise HTTPException(503, '当前宿主机采集器尚不支持多电压校准，请先更新采集器；原配置未改变。')
+            if (current['desired']['schema'] == 2 and config['profile'] == 'custom' and config['schema'] == 1):
+                raise HTTPException(409, '新版自定义配置必须保留适配器电压档位，请刷新页面后再保存。')
             if payload['expected_revision'] != current['desired']['revision']:
                 raise HTTPException(409, '配置已在其他页面改变，请重新载入后再保存。')
             try:

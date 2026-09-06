@@ -9,6 +9,7 @@ import stat
 
 
 MAX_CONFIG_BYTES = 4096
+SUPPORTED_CONFIG_SCHEMAS = (1, 2)
 DEFAULT_COEFFICIENTS = {
     'base_gain': 1.182379,
     'charge_gain': 1.2843154306288043,
@@ -22,12 +23,15 @@ class CalibrationError(ValueError):
     """A calibration configuration could not be validated, read, or saved."""
 
 
-def _coefficients(value):
+def _coefficients(value, *, allow_unconfigured=False):
     if not isinstance(value, dict) or set(value) != set(DEFAULT_COEFFICIENTS):
         raise CalibrationError('校准系数必须包含 base_gain、charge_gain、battery_gain，且不能有其他字段')
     result = {}
     for name in DEFAULT_COEFFICIENTS:
         number = value[name]
+        if allow_unconfigured and name != 'base_gain' and number is None:
+            result[name] = None
+            continue
         if isinstance(number, bool) or not isinstance(number, (int, float)):
             raise CalibrationError('校准系数必须是有限数值')
         try:
@@ -45,15 +49,31 @@ def _coefficients(value):
 
 def normalize_config(data):
     """Return canonical content with a content-derived revision; never trust its input revision."""
-    if not isinstance(data, dict) or set(data) - {'schema', 'profile', 'coefficients', 'revision'}:
+    if not isinstance(data, dict):
         raise CalibrationError('校准配置包含未知字段或不是对象')
-    if type(data.get('schema')) is not int or data['schema'] != 1:
+    schema = data.get('schema')
+    allowed = {'schema', 'profile', 'coefficients', 'revision'}
+    if schema == 2:
+        allowed.add('ac_voltage_nominal_v')
+    if set(data) - allowed:
+        raise CalibrationError('校准配置包含未知字段或不是对象')
+    if type(schema) is not int or schema not in SUPPORTED_CONFIG_SCHEMAS:
         raise CalibrationError('不支持的校准配置版本')
     profile = data.get('profile')
     if not isinstance(profile, str) or profile not in PROFILES:
         raise CalibrationError('未知校准配置')
     supplied = data.get('coefficients')
-    if profile == 'none':
+    if schema == 2:
+        if profile != 'custom':
+            raise CalibrationError('版本 2 仅支持自定义校准配置')
+        voltage = data.get('ac_voltage_nominal_v')
+        if (isinstance(voltage, bool) or not isinstance(voltage, (int, float))
+                or voltage not in (12, 19, 20)):
+            raise CalibrationError('适配器标称电压必须为 12、19 或 20 V')
+        coefficients = _coefficients(supplied, allow_unconfigured=True)
+        config = {'schema': 2, 'profile': profile, 'ac_voltage_nominal_v': int(voltage),
+                  'coefficients': coefficients}
+    elif profile == 'none':
         if supplied is not None:
             raise CalibrationError('关闭校准时 coefficients 必须为 null')
         coefficients = None
@@ -63,7 +83,9 @@ def normalize_config(data):
         coefficients = dict(DEFAULT_COEFFICIENTS)
     else:
         coefficients = _coefficients(supplied)
-    config = {'schema': 1, 'profile': profile, 'coefficients': coefficients}
+    if schema == 1:
+        # Preserve the exact schema-1 canonical content and revisions on upgrade.
+        config = {'schema': 1, 'profile': profile, 'coefficients': coefficients}
     canonical = json.dumps(config, sort_keys=True, separators=(',', ':'), allow_nan=False)
     config['revision'] = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
     return config

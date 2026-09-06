@@ -19,12 +19,12 @@
 - 查看最长一年的历史趋势、供电与连接事件，导出含均值和极值的 CSV。
 - 对照电芯压差的均值与峰值，查看实际记录的日期跨度。
 - 查看每次电池供电的起止时间、观测时长、起止电量，以及次数和电量净下降。
-- 在网页切换功率校准配置、查看公式和系数，保存自定义系数。
+- 用手工交流读数分步校准，或直接查看、调整功率系数；支持确认 12/19/20 V 适配器输入。
 - 查看硬件资料、NUT 状态与采集诊断。
 
 趋势可选 1 小时、24 小时、7 天、30 天、90 天、半年（180 天）和一年（365 天）。超过 90 天使用按日统计；图表保留完整所选时间范围，尚未采集或中断的部分留空，已有几天数据就只显示几天。
 
-电池供电明细从升级后的首次有效采样开始记录，旧事件和聚合历史不会被补成明细。默认查看 90 天，可选 7 天至一年；缺少起止或采集中断的记录会标为不完整。电量净下降以百分点计，允许出现电量回升，不是耗电瓦时或电池循环次数。
+电池供电明细从首次启用 v0.5.0 或更新版本后的有效采样开始记录，旧事件和聚合历史不会被补成明细。默认查看 90 天，可选 7 天至一年；缺少起止或采集中断的记录会标为不完整。电量净下降以百分点计，允许出现电量回升，不是耗电瓦时或电池循环次数。
 
 功率相关字段仍有协议解释和测点限制；可选经验模型默认关闭（校准配置 `none`），不套用开发样机系数，详见[功率校准](docs/calibration.md)。
 
@@ -96,27 +96,18 @@ services:
 
 最后在浏览器打开 **`http://NAS_IP:9086`**，将 `NAS_IP` 替换为 NAS 的局域网地址。
 
-采集器首次安装后会自动运行。已有 v0.4.0 采集器升级到 v0.5.0 时，只需更新面板容器，无需重装采集器。
+采集器首次安装后会自动运行。旧版本升级到 v0.6.0 时，需按下方步骤同时更新采集器与面板。
 
 ## 更新
 
-**v0.5.0 兼容现有 v0.4.0 采集器。** SSH 登录后，在项目目录执行（路径与安装时一致）：
-
-```sh
-cd /volume1/docker/ugreen-ups-panel
-sudo docker compose pull && sudo docker compose up -d
-```
-
-默认使用 `bsakuramiku/ugreen-ups-panel:latest`。版本变更见 [Release](https://github.com/BSakura-Miku/ugreen-ups-panel/releases)。
-
-**若仍使用 v0.3.x 或更早的采集器**，需先更新一次宿主机采集器，网页保存的校准配置才能生效。将下方 `/volume1/docker/ugreen-ups-panel` 改为现有项目路径后执行；源码会下载到临时目录，安装结束后清理，保留原 `data` 与 `docker-compose.yaml`：
+**v0.6.0 需要先升级宿主机采集器，再更新面板容器**，才能使用分步校准和新的电压配置。先按[备份说明](docs/architecture.md#备份与维护)保存数据库和校准配置，再执行下面命令；将 `/volume1/docker/ugreen-ups-panel` 改为现有项目路径。源码下载到临时目录，安装后清理，原 `data` 与 `docker-compose.yaml` 保留。
 
 ```sh
 (
   set -eu
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT
-  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.4.0 -o "$tmp_dir/source.tar.gz"
+  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.6.0 -o "$tmp_dir/source.tar.gz"
   tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir"
   sudo sh "$tmp_dir/scripts/install-collector.sh" --data-dir /volume1/docker/ugreen-ups-panel/data
   sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml pull
@@ -124,13 +115,19 @@ sudo docker compose pull && sudo docker compose up -d
 )
 ```
 
+默认镜像为 `bsakuramiku/ugreen-ups-panel:latest`，版本变更见 [Release](https://github.com/BSakura-Miku/ugreen-ups-panel/releases)。旧采集器不能读取新版校准配置，回退时还需恢复兼容配置，详见[校准升级与回滚](docs/calibration.md#升级与回滚)。
+
 ## 网页功率校准
 
-打开网页中的**功率校准**，可查看当前生效配置、三个系数及计算公式，并选择 `none`（关闭估算）、`local-19v-v1`（开发样机配置）或 `custom`（自定义）。默认仍为 `none`。系数最多显示 4 位小数，计算与未修改字段的保存仍保留完整精度。
+打开**功率校准**，可查看当前实际配置、系数与公式。新手可按分步助手操作：
 
-自定义时，`base_gain` 与 `battery_gain` 大于 `0`、不超过 `10`；`charge_gain` 为 `0`–`10`。这些范围只是输入限制，**自定义配置始终标为未独立验证**，不会因保存成功而获得精度保证。
+1. **确认适配器电压。** 页面根据适配器输入读数预选 `12/19/20 V`，仍需自己确认；不是按 UPS 输出电压选择。
+2. **校准交流基底。** 保持外部供电、未充电且负载稳定，采样 30 秒后填入同期智能插座或功率计的交流读数（W）。这一步可单独保存，先启用未充电时的交流估算。
+3. **回充补偿可后补。** UPS 自然进入充电状态后，再采样并填写同期交流读数。未校准的回充或电池系数留空，不必凑齐三个数。
 
-页面分别显示“已保存”和“已生效”；需等采集器用新配置生成新鲜数据后才算生效。配置保存在已有的 `./data/calibration.json`，无需增加 Compose 参数。原始读数和已有历史保留，不同校准版本的历史分开统计。模型仍使用 18–20 V 交流输入限制与 8 秒平滑，详见[功率校准说明](docs/calibration.md)。
+每个采样窗口至少需要 12 个去重读数；数据缺失、模式变化或相关读数波动超过 10% 时重采。填写结果后点击保存，等待采集器确认生效。助手使用手工输入的交流读数，不自动连接 HA、切换插座或安排断电。
+
+默认仍为 `none`，也可选择 `local-19v-v1` 或 `custom`；样机预设仅适用于原 19 V 配置，不能用于 12 V。自定义交流估算按所选电压 ±1 V 匹配，使用 8 秒平滑，始终标为未独立验证。系数范围、部分配置与模型证据见[功率校准说明](docs/calibration.md)。
 
 ## 配置与数据
 

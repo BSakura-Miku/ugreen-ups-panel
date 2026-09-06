@@ -1,14 +1,12 @@
 import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Activity, ArrowDownToLine, BatteryCharging, Cable, ChevronRight, CircleHelp, Cpu, Database, PlugZap, Radio, ShieldCheck, SlidersHorizontal, Zap } from 'lucide-react';
-import type { BatterySession, BatterySessions, CalibrationCoefficients, CalibrationConfig, History } from './types';
+import type { BatterySession, BatterySessions, History, LiveView, Sample } from './types';
 import CalibrationSettings, { calibrationLabel } from './CalibrationSettings';
 import logo from './assets/us3000-logo.png';
 import './style.css';
 const Chart = lazy(() => import('./HistoryChart'));
 
-type Sample = { calibration_profile?: string; calibration_revision?: string; calibration_coefficients?: CalibrationCoefficients | null; battery_energy_estimate_w?: number | null; battery_estimate_quality?: string; ac_input_estimate_w?: number | null; ac_estimate_quality?: string; battery_charge_current_candidate_a?: number | null; battery_discharge_current_candidate_a?: number | null; battery_charge_power_candidate_w?: number | null; battery_discharge_power_candidate_w?: number | null; timestamp: number; mode: string; soc: number; input_voltage: number | null; output_voltage: number | null; current: number | null; current_kind: string; power_w: number | null; dc_power_estimate_w?: number | null; battery_voltage: number; cells: number[]; cell_delta_mv: number; runtime_sec: number | null; load_percent: number | null; warnings: string[]; raw_fields?: { be_u16: Record<string, number>; byte_26?: number; byte_27?: number; byte_28: number; frame_hex: string } };
-type View = { calibration?: { config: CalibrationConfig | null; configurable: boolean; error: string | null }; fresh: boolean; source: string; age_sec: number | null; sample: Sample | null; device?: { serial: string }; nut?: { fresh: boolean; values?: Record<string, string> }; diagnostics?: { frames?: number; dropped?: number; rejected?: number; error?: string }; storage_error?: string | null };
 type Event = { timestamp: number; kind: string; detail: string };
 const modes: Record<string, string> = { online: '外部供电', charging: '电池充电中', battery: '电池供电', unknown: '状态待确认' };
 const num = (n: number | null | undefined, digits = 1) => typeof n === 'number' && Number.isFinite(n) ? n.toFixed(digits) : '—';
@@ -65,6 +63,8 @@ function powerNote(sample: Sample | null | undefined, kind: 'ac' | 'battery') {
   if (!sample) return '等待实时数据';
   const quality = kind === 'ac' ? sample.ac_estimate_quality : sample.battery_estimate_quality;
   if (quality === 'not_configured') return '尚未启用 · 前往功率校准设置';
+  if (quality === 'charge_not_configured') return '回充尚未校准 · 前往校准助手';
+  if (quality === 'battery_not_configured') return '电池放电尚未校准';
   if (kind === 'ac' && sample.mode === 'battery') return '电池供电期间不提供此估算';
   if (kind === 'battery' && ['online', 'charging'].includes(sample.mode)) return '外部供电中 · 电池未放电';
   if (quality === 'warming_up') return '供电状态已切换 · 正在稳定读数';
@@ -151,7 +151,7 @@ function BatterySessionRecords({ days, onDaysChange }: { days: number; onDaysCha
 }
 
 function App() {
-  const [view, setView] = useState<View | null>(null);
+  const [view, setView] = useState<LiveView | null>(null);
   const [receivedAt, setReceivedAt] = useState(Date.now());
   const [historyLoading, setHistoryLoading] = useState(true);
   const [apiError, setApiError] = useState(false);
@@ -170,7 +170,7 @@ function App() {
   useEffect(() => {
     let done = false; const controller = new AbortController(); let timer: ReturnType<typeof setTimeout>;
     async function update() {
-      try { const body = await fetchJson<View>('/api/live', controller.signal); if (!done) { setView(body); setReceivedAt(Date.now()); setApiError(false); } }
+      try { const body = await fetchJson<LiveView>('/api/live', controller.signal); if (!done) { setView(body); setReceivedAt(Date.now()); setApiError(false); } }
       catch { if (!done) setApiError(true); }
       finally { if (!done) timer = setTimeout(update, 2000); }
     }
@@ -240,15 +240,15 @@ function App() {
         <article className="panel cells"><div className="panel-heading"><div><h3>电芯状态</h3><p>4 节串联 · 电压分布</p></div><BatteryCharging size={19} /></div><div className="delta"><strong>{num(currentSample?.cell_delta_mv, 0)}<span>mV</span></strong><span>最大压差</span></div><div className="cell-list">{[0, 1, 2, 3].map(i => <div key={i} className="cell-row"><span>电芯 0{i + 1}</span><div className="cell-track"><i style={{ width: currentSample ? `${Math.max(0, Math.min(100, (currentSample.cells[i] - 2.5) / 1.8 * 100))}%` : '0%' }} /></div><strong>{num(currentSample?.cells[i], 3)} <small>V</small></strong></div>)}</div><div className="cell-note"><CircleHelp size={14} />压差反映电芯均衡程度，不等于电池容量。</div></article></section>
         <BatterySessionRecords days={sessionDays} onDaysChange={setSessionDays} />
         <article className="panel events"><div className="panel-heading"><h3>最近状态事件</h3><span className="muted">最近事件</span></div>{eventsError ? <p className="muted">事件查询暂不可用。</p> : events.length ? events.slice(0, 5).map((e, i) => <div className="event-row" key={i}><span className={`dot ${e.detail === 'offline' ? 'amber' : 'green'}`} /><span>{e.detail === 'offline' ? '采集数据离线' : `${e.kind === 'power' ? '供电状态' : '连接恢复'} · ${modes[e.detail.split(':')[1]] || '状态更新'}`}</span><time>{new Date(e.timestamp * 1000).toLocaleString('zh-CN', { hour12: false })}</time></div>) : <p className="muted">暂无状态变化记录。</p>}</article>
-      </> : tab === 'calibration' ? <CalibrationSettings /> : tab === 'hardware' ? <section className="hardware-page">
+      </> : tab === 'calibration' ? <CalibrationSettings live={view} liveFresh={!!fresh} liveAge={age} /> : tab === 'hardware' ? <section className="hardware-page">
         <article className="hardware-intro"><div><div className="eyebrow">DC UPS · US3000</div><h2>小体积，持续供电。</h2><p>直流供电结构，让 NAS 在市电中断时继续运行。电池管理与电源转换分别承担储能监测和供电任务。</p></div><div className="hardware-rating"><strong>120<span>W</span></strong><span>额定最大输出</span></div></article>
         <div className="spec-strip"><div><strong>43.2 Wh</strong><span>整机标称电池能量</span></div><div><strong>4S · 3 Ah</strong><span>四节串联电池组</span></div><div><strong>12 V / 10 A</strong><span>额定电池输出</span></div><div><strong>约 439 g</strong><span>拆解样机重量</span></div></div>
         <article className="panel"><h3>供电结构</h3><div className="topology-row"><span>19 V 适配器</span><ChevronRight/><span>US3000 直通</span><ChevronRight/><span>NAS</span></div><div className="topology-row"><span>四串锂电池</span><ChevronRight/><span>12 V 稳压输出</span><ChevronRight/><span>NAS</span></div><p className="muted">以上电压路径来自本机切换记录；额定输出规格与市电直通电压分别列示。</p></article>
         <article className="panel"><h3>核心器件</h3><div className="chip-list">{[['GD32F303RCT6', '整机控制', 'GigaDevice · Cortex-M4'], ['CBM8580KV6NT', '电池管理', 'Chipsea · 多串锂电池监测与保护'], ['TPS55289', '升降压转换', 'Texas Instruments · 同步升降压'], ['SC8002', '降压控制', 'Southchip · 同步降压控制器'], ['LM74610-Q1', '理想二极管控制', 'Texas Instruments · 电源路径控制']].map(([name,role,detail]) => <div key={name}><Cpu size={20}/><strong>{name}</strong><span>{role}</span><small>{detail}</small></div>)}</div></article>
         <article className="panel"><h3>电池与结构</h3><dl>{[['电芯', 'SunPower INR18650-3000 × 4'], ['单节标称', '3.7 V · 3000 mAh'], ['整机电池标称', '14.4 V · 3000 mAh'], ['输入规格', '12 V / 10 A · 19 V / 7.9 A · 20 V / 7 A'], ['结构', '控制板与功率板分层，带独立温度探头']].map(([k,v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl><p className="muted">硬件资料来自拆解样机及产品规格，不代表已读取本机芯片型号。电芯标称电压合计与整机标称口径不同；43.2 Wh 不等同于实测可用能量。</p><div className="source-links"><a href="https://www.chongdiantou.com/archives/1749216234051.html" target="_blank" rel="noreferrer">充电头网拆解 ↗</a><a href="https://ai.ugreen.com/products/ugreen-nas-backup-power-120w-12000mah" target="_blank" rel="noreferrer">UGREEN 产品规格 ↗</a><a href="https://www.ti.com/product/TPS55289" target="_blank" rel="noreferrer">TI 器件资料 ↗</a></div></article>
       </section> : <section className="diagnostic-grid"><article className="panel"><h3>数据来源与精度</h3><p>实时数据来自本机 UPS USB 遥测。电量、电压为设备报告值；功率和电池电流属于估算值。</p><h3>交流输入功率</h3><p>{calibrated ? localCalibration ? '已启用开发样机 19 V 适配器校准，包含回充补偿，采用 8 秒平滑。' : '已启用自定义系数，采用 8 秒平滑；自定义估算未经过独立验证。' : '当前尚未启用适用于此设备的功率校准。电量、电压和设备电流仍正常显示；功率主卡在配置校准后提供估算。'}面板运行不读取智能插座。</p><p>开源安装默认不套用其他设备的校准系数。可在<a href="#calibration">功率校准</a>中查看实际生效的系数，或依据本机测量调整自定义系数。</p>{localCalibration && <p>开发样机配置的非充电独立样本平均绝对误差约 1.4 W；充电时段后半段验证约 1.1 W，最大约 4.6 W。验证范围约 58–83 W，不代表全量程精度。更换适配器、固件或接线后需要重新校准。</p>}<p>开发样机配置超出已验证负载或充电电流范围时标注“仅供参考”；电池供电时不提供交流估算。电池侧功率与电流未经过独立直流仪表校准，不能视作 NAS 输出功率。</p><h3>电池供电功率</h3><p>电池放电功率表示电池端释放能量的速率，包含 UPS 转换损耗，与 NAS 输出功率不同。开发样机配置使用 43.2 Wh 标称能量及长放电电量趋势校准，并作 8 秒平滑；假设实际容量接近标称、SOC 近似能量比例。容量衰减可能使估算偏高，尚无独立仪表精度验证。</p><h3>历史与状态</h3><p>状态切换和数据中断分别记录。不同计算版本的历史分开存储；无数据时留空。设备未提供可用的续航与负载率，因此不展示。</p></article>
-      <article className="panel"><h3>连接与记录</h3><dl>{[['校准配置', calibrationLabel(s?.calibration_profile)], ['采集连接', fresh ? '正常' : '等待恢复'], ['历史存储', view ? view.storage_error || '正常' : '等待数据'], ['有效报文', view?.diagnostics?.frames ?? '—'], ['丢弃报文', view?.diagnostics?.dropped ?? '—'], ['系统 UPS 服务', nut?.fresh ? '已连接' : '暂不可用']].map(([k,v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl><p className="muted">监控采用只读采集。关机与电源保护由 NAS 系统管理。</p><details><summary>高级诊断</summary><p>输出电流原读数：{num(currentSample?.current,3)} A；输出功率原计算：{num(currentSample?.dc_power_estimate_w)} W。两者未完成测点及比例校准，不作为主要功耗指标。</p><p>充电电流使用字节 29–30，放电电流使用 31–32，按原值 ÷ 1000 计算；电池功率使用电池组电压。字节 20 不解释为总输入电流。</p><p>{calibrated && coefficients ? `最近报告的系数：交流基底 ${String(coefficients.base_gain)}，回充补偿 ${String(coefficients.charge_gain)}，电池放电 ${String(coefficients.battery_gain)}。` : '当前未报告已启用的校准系数。'}<a href="#calibration">查看系数与公式 ↗</a> 系数为经验参数，不是转换效率。</p><dl>{Object.entries(currentSample?.raw_fields?.be_u16 || {}).map(([k,v]) => <div key={k}><dt>字节 {k}–{Number(k)+1}</dt><dd>{v}</dd></div>)}</dl><h3>系统接口原值</h3><dl>{Object.entries(nut?.values || {}).map(([k,v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl></details>{s?.warnings?.map(w => <p className="notice" key={w}>{w}</p>)}</article></section>}
-      <footer><span><ShieldCheck size={14} />面板不执行关机或 UPS 控制</span><span>US3000 Monitor · v0.5.0</span></footer>
+      <article className="panel"><h3>连接与记录</h3><dl>{[['校准配置', calibrationLabel(s?.calibration_profile)], ['采集连接', fresh ? '正常' : '等待恢复'], ['历史存储', view ? view.storage_error || '正常' : '等待数据'], ['有效报文', view?.diagnostics?.frames ?? '—'], ['丢弃报文', view?.diagnostics?.dropped ?? '—'], ['系统 UPS 服务', nut?.fresh ? '已连接' : '暂不可用']].map(([k,v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl><p className="muted">监控采用只读采集。关机与电源保护由 NAS 系统管理。</p><details><summary>高级诊断</summary><p>输出电流原读数：{num(currentSample?.current,3)} A；输出功率原计算：{num(currentSample?.dc_power_estimate_w)} W。两者未完成测点及比例校准，不作为主要功耗指标。</p><p>充电电流使用字节 29–30，放电电流使用 31–32，按原值 ÷ 1000 计算；电池功率使用电池组电压。字节 20 不解释为总输入电流。</p><p>{calibrated && coefficients ? `最近报告的系数：交流基底 ${String(coefficients.base_gain)}，回充补偿 ${coefficients.charge_gain === null ? '未校准' : String(coefficients.charge_gain)}，电池放电 ${coefficients.battery_gain === null ? '未校准' : String(coefficients.battery_gain)}。` : '当前未报告已启用的校准系数。'}<a href="#calibration">查看系数与公式 ↗</a> 系数为经验参数，不是转换效率。</p><dl>{Object.entries(currentSample?.raw_fields?.be_u16 || {}).map(([k,v]) => <div key={k}><dt>字节 {k}–{Number(k)+1}</dt><dd>{v}</dd></div>)}</dl><h3>系统接口原值</h3><dl>{Object.entries(nut?.values || {}).map(([k,v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl></details>{s?.warnings?.map(w => <p className="notice" key={w}>{w}</p>)}</article></section>}
+      <footer><span><ShieldCheck size={14} />面板不执行关机或 UPS 控制</span><span>US3000 Monitor · v0.6.0</span></footer>
     </main>
   </div>;
 }

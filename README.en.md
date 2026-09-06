@@ -19,12 +19,12 @@ A UGREEN US3000 dashboard for power state, battery charge, cell voltages, and hi
 - Up to one year of history, power and connection events, and CSV export with averages and extrema.
 - Mean and peak cell voltage difference, with the actual dates covered by recorded data.
 - Individual battery-power records with start/end times, observed duration, start/end charge, occurrence counts, and net charge decrease.
-- Web controls for calibration profiles, exact coefficients, formulas, and custom coefficients.
+- A step-by-step assistant using manually entered AC readings, with confirmed 12/19/20 V adapter input and editable coefficients.
 - Hardware references, NUT status, and capture diagnostics.
 
 Trend ranges include 1 hour, 24 hours, 7 days, 30 days, 90 days, half a year (180 days), and one year (365 days). Ranges longer than 90 days use daily aggregates. Charts keep the entire selected time range, leaving unrecorded periods and gaps empty; a few days of data remain a few days of data.
 
-Battery-power records begin with the first valid sample after upgrading; older events and aggregates are not converted into session details. The default range is 90 days, with choices from 7 days to one year. Missing transitions or interrupted capture produce incomplete records. Net charge decrease is measured in percentage points and may be negative when charge readings rise; it is not energy in Wh or a battery cycle count.
+Battery-power records begin with valid sampling after first enabling v0.5.0 or later; older events and aggregates are not converted into session details. The default range is 90 days, with choices from 7 days to one year. Missing transitions or interrupted capture produce incomplete records. Net charge decrease is measured in percentage points and may be negative when charge readings rise; it is not energy in Wh or a battery cycle count.
 
 Power fields still have protocol and measurement-location limitations. The optional empirical model is disabled by default (calibration profile `none`), so coefficients from the development unit are not applied. See [power calibration](docs/calibration.md).
 
@@ -52,26 +52,18 @@ The installer sets up the host collector and prepares the data directory. Compos
 
 Open `http://NAS_IP:9086`, replacing `NAS_IP` with your NAS's LAN address.
 
-The collector runs automatically after installation. Upgrading to v0.5.0 with an existing v0.4.0 collector requires only a dashboard container update; no collector reinstall is needed.
+The collector runs automatically after installation. Upgrading to v0.6.0 requires both the collector and dashboard update described below.
 
 ## Update
 
-**v0.5.0 supports the existing v0.4.0 collector.** Run from the project directory:
-
-```sh
-docker compose pull && docker compose up -d
-```
-
-The default image is `bsakuramiku/ugreen-ups-panel:latest`. Check [release notes](https://github.com/BSakura-Miku/ugreen-ups-panel/releases) for changes.
-
-**If the collector is still v0.3.x or earlier, update it once** before calibration saved in the dashboard can take effect. Replace `/volume1/docker/ugreen-ups-panel` below with your existing project path. Source files are downloaded into a temporary directory and removed afterward; your existing `data` and `docker-compose.yaml` are retained.
+**For v0.6.0, update the host collector first, then the dashboard container** to use the calibration assistant and voltage settings. Follow the [backup instructions](docs/architecture.md#备份与维护) for the database and calibration file before updating. Replace `/volume1/docker/ugreen-ups-panel` below with your existing project path. Temporary source files are removed afterward; your existing `data` and `docker-compose.yaml` are retained.
 
 ```sh
 (
   set -eu
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT
-  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.4.0 -o "$tmp_dir/source.tar.gz"
+  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.6.0 -o "$tmp_dir/source.tar.gz"
   tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir"
   sudo sh "$tmp_dir/scripts/install-collector.sh" --data-dir /volume1/docker/ugreen-ups-panel/data
   sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml pull
@@ -79,13 +71,19 @@ The default image is `bsakuramiku/ugreen-ups-panel:latest`. Check [release notes
 )
 ```
 
+The default image is `bsakuramiku/ugreen-ups-panel:latest`; see [release notes](https://github.com/BSakura-Miku/ugreen-ups-panel/releases). Older collectors cannot read the new calibration format. A rollback also requires a compatible configuration; see [calibration upgrades and rollback](docs/calibration.md#升级与回滚).
+
 ## Web power calibration
 
-Open **功率校准** in the dashboard to view the active profile, three exact coefficients, and formulas. Choose `none` (estimates disabled), `local-19v-v1` (the development unit's profile), or `custom`. The default remains `none`.
+Open **功率校准** to view the active configuration, coefficients, and formulas. The assistant offers these steps:
 
-For custom coefficients, `base_gain` and `battery_gain` must be greater than `0` and at most `10`; `charge_gain` accepts `0`–`10`. These are input limits, not evidence of accuracy. **Custom profiles always remain independently unverified.**
+1. **Confirm the adapter voltage.** The page suggests `12/19/20 V` from the adapter input reading, but requires your confirmation. UPS output voltage is not used for this selection.
+2. **Calibrate the AC baseline.** With stable external power and no charging, collect 30 seconds of telemetry, then enter the matching AC reading in watts from your smart plug or power meter. This step can be saved on its own to enable estimates while not charging.
+3. **Add charging compensation later.** When the UPS naturally enters charging mode, collect another window and enter its matching AC reading. Leave uncalibrated charging and battery coefficients empty.
 
-The dashboard distinguishes saved settings from active settings. A configuration is active only after the collector produces fresh telemetry using it. Settings live in the existing `./data/calibration.json`; no new Compose settings are needed. Raw readings and earlier history are retained, with different calibration revisions aggregated separately. The model keeps the 18–20 V AC-input constraint and 8-second smoothing window. See [power calibration](docs/calibration.md).
+Each window needs at least 12 distinct readings. Missing data, mode changes, or more than 10% variation in relevant raw readings require another window. Save the calculated settings and wait for collector confirmation. AC readings are entered manually; the assistant does not connect to HA, switch the plug, or initiate a power interruption.
+
+The default remains `none`; `local-19v-v1` and `custom` are also available. The development preset retains its original 19 V scope and cannot be used for 12 V. Custom AC estimates require input within ±1 V of the selected voltage and use 8-second smoothing. They always remain independently unverified. See [power calibration](docs/calibration.md) for coefficient limits, partial configurations, and model evidence.
 
 ## Configuration and data
 
