@@ -6,6 +6,7 @@ import math
 import os
 from pathlib import Path
 import shutil
+import shlex
 import subprocess
 import tempfile
 import time
@@ -93,7 +94,7 @@ def validate_fresh(started, timeout=20):
     raise RuntimeError(f'No fresh UPS telemetry within {timeout} seconds; check USB connection and the existing UPS driver.')
 
 
-def write_environment(profile):
+def write_environment(profile, calibration_path):
     path = CONFIGS['env']
     text = path.read_text() if path.exists() else '# Passive UPS collector configuration\nUPS_SERIAL=\nUPS_NUT_TARGET=ups0@localhost\n'
     if profile is not None:
@@ -101,13 +102,16 @@ def write_environment(profile):
         text += 'UPS_CALIBRATION_PROFILE=' + profile + '\n'
     elif not any(line.strip().startswith('UPS_CALIBRATION_PROFILE=') for line in text.splitlines()):
         text += '\nUPS_CALIBRATION_PROFILE=none\n'
+    text = '\n'.join(line for line in text.splitlines()
+                     if not line.strip().startswith('UPS_CALIBRATION_CONFIG=')) + '\n'
+    text += 'UPS_CALIBRATION_CONFIG=' + json.dumps(str(calibration_path), ensure_ascii=False) + '\n'
     path.write_text(text)
     path.chmod(0o600)
 
 
-def prepare_data_directory(source):
+def prepare_data_directory(source, data_dir=None):
     """Prepare only the bind-mount directory; preserve every existing data file."""
-    data = source / 'data'
+    data = Path(data_dir) if data_dir is not None else source / 'data'
     if data.is_symlink() or (data.exists() and not data.is_dir()):
         raise ValueError('Project data must be a directory, not a symlink or file.')
     data.mkdir(mode=0o750, exist_ok=True)
@@ -121,10 +125,28 @@ def prepare_data_directory(source):
             os.fchmod(fd, 0o750)
     finally:
         os.close(fd)
+    return data.resolve()
 
 
-def install(source, profile=None):
-    for filename in ('__init__.py', 'collector.py', 'protocol.py', 'power.py', 'usbmon.py'):
+def installation_data_directory(source, data_dir):
+    if data_dir is not None:
+        chosen = Path(data_dir)
+    else:
+        chosen = source / 'data'
+        env = CONFIGS['env']
+        for line in env.read_text().splitlines() if env.exists() else []:
+            if line.strip().startswith('UPS_CALIBRATION_CONFIG='):
+                values = shlex.split(line.split('=', 1)[1], comments=False)
+                if len(values) != 1 or Path(values[0]).name != 'calibration.json':
+                    raise ValueError('Invalid existing calibration path; specify --data-dir explicitly.')
+                chosen = Path(values[0]).parent
+    if not chosen.is_absolute() or any(ord(c) < 32 for c in str(chosen)):
+        raise ValueError('Data directory must be an absolute path without control characters.')
+    return chosen
+
+
+def install(source, profile=None, data_dir=None):
+    for filename in ('__init__.py', 'collector.py', 'protocol.py', 'power.py', 'calibration.py', 'usbmon.py'):
         if not (source / 'ups_panel' / filename).is_file():
             raise ValueError(f'Collector source is incomplete: {filename}')
     for filename in ('ugreen-ups-collector.service', 'ugreen-ups-panel.tmpfiles.conf'):
@@ -132,7 +154,7 @@ def install(source, profile=None):
             raise ValueError(f'Deployment source is incomplete: {filename}')
     command('/usr/bin/python3', '-c', 'import ctypes, select, sqlite3; import sys; assert sys.version_info >= (3, 10), "Python 3.10+ required"')
     command('/sbin/modinfo', 'usbmon')
-    prepare_data_directory(source)
+    data = prepare_data_directory(source, installation_data_directory(source, data_dir))
     (BASE / 'releases').mkdir(parents=True, exist_ok=True)
     release = Path(tempfile.mkdtemp(prefix=time.strftime('%Y%m%d-%H%M%S-'), dir=BASE / 'releases'))
     release.chmod(0o755)
@@ -144,7 +166,7 @@ def install(source, profile=None):
     if not marker.exists():
         marker.write_text('preexisting\n' if Path('/sys/module/usbmon').exists() else 'absent\n')
     try:
-        write_environment(profile)
+        write_environment(profile, data / 'calibration.json')
         for name, filename in (('service', 'ugreen-ups-collector.service'), ('tmpfiles', 'ugreen-ups-panel.tmpfiles.conf')):
             shutil.copyfile(source / 'deploy' / filename, CONFIGS[name])
             CONFIGS[name].chmod(0o644)
@@ -202,14 +224,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=('install', 'rollback'))
     parser.add_argument('--calibration-profile', choices=('none', 'local-19v-v1'))
+    parser.add_argument('--data-dir', type=Path, help='Existing dashboard data directory; defaults to saved path or source/data')
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error('Run as root')
-    if args.action == 'rollback' and args.calibration_profile:
-        parser.error('--calibration-profile applies to installation only')
+    if args.action == 'rollback' and (args.calibration_profile or args.data_dir):
+        parser.error('--calibration-profile and --data-dir apply to installation only')
     try:
         if args.action == 'install':
-            install(Path(__file__).resolve().parents[1], args.calibration_profile)
+            install(Path(__file__).resolve().parents[1], args.calibration_profile, args.data_dir)
         else:
             rollback()
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:

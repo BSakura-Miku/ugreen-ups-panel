@@ -7,14 +7,17 @@ from collections import deque
 import math
 from statistics import mean
 
-BASE_GAIN = 1.182379
-BATTERY_NOMINAL_GAIN = 1.2091130139203523
-CHARGE_GAIN = 1.2843154306288043
-CALIBRATION_PROFILES = ('none', 'local-19v-v1')
+from .calibration import DEFAULT_COEFFICIENTS, PRESET_PROFILES, default_config, normalize_config
+
+BASE_GAIN = DEFAULT_COEFFICIENTS['base_gain']
+BATTERY_NOMINAL_GAIN = DEFAULT_COEFFICIENTS['battery_gain']
+CHARGE_GAIN = DEFAULT_COEFFICIENTS['charge_gain']
+CALIBRATION_PROFILES = PRESET_PROFILES
 ESTIMATE_FIELDS = (
     'battery_energy_estimate_w', 'battery_estimate_basis', 'battery_estimate_quality',
     'ac_input_estimate_w', 'ac_estimate_quality', 'ac_estimate_model',
     'ac_estimate_window_sec', 'calibration_profile', 'calibration_verified',
+    'calibration_revision', 'calibration_coefficients',
 )
 
 
@@ -28,10 +31,10 @@ def finite_number(value):
 
 
 class PowerEstimator:
-    def __init__(self, profile='none'):
-        if profile not in CALIBRATION_PROFILES:
-            raise ValueError(f'Unknown calibration profile: {profile}')
-        self.profile = profile
+    def __init__(self, profile='none', *, config=None):
+        self.config = default_config(profile) if config is None else normalize_config(config)
+        self.profile = self.config['profile']
+        self.coefficients = self.config['coefficients']
         self.window = deque()
         self.mode = None
         self.last_ts = None
@@ -41,19 +44,26 @@ class PowerEstimator:
         result = self._update(sample)
         if finite_number(sample.get('timestamp')):
             self.last_ts = sample['timestamp']
-            self.last_estimate = {k: result[k] for k in ESTIMATE_FIELDS}
+            self.last_estimate = {k: dict(result[k]) if isinstance(result[k], dict) else result[k]
+                                  for k in ESTIMATE_FIELDS}
         return result
 
     def _update(self, sample):
         enabled = self.profile != 'none'
+        custom = self.profile == 'custom'
+        revision = self.config['revision']
         sample.update(
             battery_energy_estimate_w=None,
-            battery_estimate_basis='nominal_43_2wh_soc_v1' if enabled else None,
+            battery_estimate_basis=(f'us3000_battery_custom_{revision}' if custom else
+                                    'nominal_43_2wh_soc_v1' if enabled else None),
             battery_estimate_quality='unavailable' if enabled else 'not_configured',
             ac_input_estimate_w=None,
             ac_estimate_quality='unavailable' if enabled else 'not_configured',
-            ac_estimate_model='us3000_19v_v1' if enabled else None,
+            ac_estimate_model=(f'us3000_19v_custom_{revision}' if custom else
+                               'us3000_19v_v1' if enabled else None),
             ac_estimate_window_sec=8, calibration_profile=self.profile,
+            calibration_revision=revision,
+            calibration_coefficients=dict(self.coefficients) if enabled else None,
             calibration_verified=False,
         )
         ts, mode = sample.get('timestamp'), sample.get('mode')
@@ -64,7 +74,8 @@ class PowerEstimator:
             return sample
         if ts == self.last_ts and mode == self.mode and self.last_estimate is not None:
             # Re-reading one snapshot must not count it twice or reset smoothing.
-            sample.update(self.last_estimate)
+            sample.update({k: dict(value) if isinstance(value, dict) else value
+                           for k, value in self.last_estimate.items()})
             return sample
         if (mode != self.mode or (self.last_ts is not None and
                 (ts < self.last_ts or ts - self.last_ts > 5))):
@@ -78,9 +89,10 @@ class PowerEstimator:
                 self.window.clear()
                 sample['battery_estimate_quality'] = 'invalid_data'
                 return sample
-            value = self._smooth(ts, raw * BATTERY_NOMINAL_GAIN)
+            value = self._smooth(ts, raw * self.coefficients['battery_gain'])
             sample['battery_energy_estimate_w'] = value
-            sample['battery_estimate_quality'] = ('nominal_capacity_assumption'
+            sample['battery_estimate_quality'] = (('custom_unverified' if custom else
+                                                   'nominal_capacity_assumption')
                                                   if value is not None else 'warming_up')
             return sample
         if mode not in ('online', 'charging'):
@@ -99,11 +111,15 @@ class PowerEstimator:
             self.window.clear()
             sample['ac_estimate_quality'] = 'invalid_data'
             return sample
-        estimate = self._smooth(ts, raw * BASE_GAIN + charge * CHARGE_GAIN)
+        estimate = self._smooth(ts, raw * self.coefficients['base_gain'] +
+                               charge * self.coefficients['charge_gain'])
         if estimate is None:
             sample['ac_estimate_quality'] = 'warming_up'
             return sample
         sample['ac_input_estimate_w'] = estimate
+        if custom:
+            sample['ac_estimate_quality'] = 'custom_unverified'
+            return sample
         lo, hi = (57, 79) if mode == 'online' else (70, 84)
         current = sample.get('battery_charge_current_candidate_a')
         sample['ac_estimate_quality'] = ('calibrated_range' if lo <= estimate <= hi and

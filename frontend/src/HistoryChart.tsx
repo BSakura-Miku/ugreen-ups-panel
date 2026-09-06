@@ -8,7 +8,7 @@ import type { History, Point } from './types';
 echarts.use([LineChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
 
 const labels: Record<string, string> = {
-  battery_energy_estimate_w: '电池放电功率 · 容量估算',
+  battery_energy_estimate_w: '电池放电功率 · 估算',
   ac_input_estimate_w: '交流输入功率 · 估算',
   battery_charge_power_candidate_w: '电池充电功率 · 估算',
   soc: '电量', adapter_input_voltage_v: '适配器输入电压',
@@ -36,7 +36,7 @@ export default function HistoryChart({ history, metric, unit }: { history: Histo
     const modelKey = (point: Point) => JSON.stringify([
       point.context?.calibration_profile, point.context?.ac_estimate_model,
       point.context?.battery_estimate_basis, point.context?.formula_version,
-      point.context?.decoder_version, point.context?.provenance,
+      point.context?.decoder_version, point.context?.provenance, point.context?.calibration_revision,
     ]);
     instance.current.setOption({
       backgroundColor: 'transparent', color: ['#b6ee74', '#80bdff', '#d8a9f7', '#efb673'],

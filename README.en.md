@@ -17,13 +17,14 @@ A UGREEN US3000 dashboard for power state, battery charge, cell voltages, and hi
 - External power, charging, and battery power states.
 - Charge percentage, input/output voltage, pack voltage, four cell voltages, and cell voltage difference.
 - History charts, power and connection events, and CSV export.
+- Web controls for calibration profiles, exact coefficients, formulas, and custom coefficients.
 - Hardware references, NUT status, and capture diagnostics.
 
 Power fields still have protocol and measurement-location limitations. The optional empirical model is disabled by default (calibration profile `none`), so coefficients from the development unit are not applied. See [power calibration](docs/calibration.md).
 
 ## Prerequisites
 
-- A Linux NAS connected to the UPS, with systemd, Python 3.10+, Git, Docker, and Compose v2.
+- A Linux NAS connected to the UPS, with systemd, Python 3.10+, curl, tar, Git, Docker, and Compose v2.
 - A kernel with usbmon support and working `/dev/usbmonN` devices.
 - An existing NUT/system UPS driver connected to the US3000 and continuously reading complete private `0x71` reports.
 
@@ -45,7 +46,7 @@ The installer sets up the host collector and prepares the data directory. Compos
 
 Open `http://NAS_IP:9086`, replacing `NAS_IP` with your NAS's LAN address.
 
-Install the collector once. Routine dashboard updates do not require reinstalling it.
+The collector runs automatically after installation. Routine dashboard updates do not require reinstalling it; existing users upgrading to v0.4.0 must update the collector once as described below.
 
 ## Update
 
@@ -55,13 +56,36 @@ Run from the project directory:
 docker compose pull && docker compose up -d
 ```
 
-The default image is `bsakuramiku/ugreen-ups-panel:latest`. Check [release notes](https://github.com/BSakura-Miku/ugreen-ups-panel/releases) for changes. Update the collector scripts and reinstall only when the notes require it.
+The default image is `bsakuramiku/ugreen-ups-panel:latest`. Check [release notes](https://github.com/BSakura-Miku/ugreen-ups-panel/releases) for changes.
+
+**Upgrading an existing installation to v0.4.0 requires one collector update** before calibration saved in the dashboard can take effect. Replace `/volume1/docker/ugreen-ups-panel` below with your existing project path. Source files are downloaded into a temporary directory and removed afterward; your existing `data` and `docker-compose.yaml` are retained.
+
+```sh
+(
+  set -eu
+  tmp_dir="$(mktemp -d)"
+  trap 'rm -rf "$tmp_dir"' EXIT
+  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.4.0 -o "$tmp_dir/source.tar.gz"
+  tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir"
+  sudo sh "$tmp_dir/scripts/install-collector.sh" --data-dir /volume1/docker/ugreen-ups-panel/data
+  sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml pull
+  sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml up -d
+)
+```
+
+## Web power calibration
+
+Open **功率校准** in the dashboard to view the active profile, three exact coefficients, and formulas. Choose `none` (estimates disabled), `local-19v-v1` (the development unit's profile), or `custom`. The default remains `none`.
+
+For custom coefficients, `base_gain` and `battery_gain` must be greater than `0` and at most `10`; `charge_gain` accepts `0`–`10`. These are input limits, not evidence of accuracy. **Custom profiles always remain independently unverified.**
+
+The dashboard distinguishes saved settings from active settings. A configuration is active only after the collector produces fresh telemetry using it. Settings live in the existing `./data/calibration.json`; no new Compose settings are needed. Raw readings and earlier history are retained, with different calibration revisions aggregated separately. The model keeps the 18–20 V AC-input constraint and 8-second smoothing window. See [power calibration](docs/calibration.md).
 
 ## Configuration and data
 
 - The default port is `9086`. To change the port or image version, edit `docker-compose.yaml`, then run `docker compose up -d`.
 - Compose automatically reads `docker-compose.yaml`; the top-level `name` field is optional. By default, the project name comes from the deployment directory, so the steps above use `ugreen-ups-panel`.
-- History lives in `./data/history.sqlite` under the project directory and survives container recreation. Keep and back up the `data` directory.
+- History lives in `./data/history.sqlite`, and web calibration settings live in `./data/calibration.json`. Both survive container recreation. Keep and back up the whole `data` directory.
 - The container reads host snapshots through a read-only mount. The collector runs alongside the existing UPS service.
 
 See [architecture](docs/architecture.md) for data flow, history storage, and backup details.

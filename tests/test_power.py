@@ -1,5 +1,7 @@
 from pathlib import Path
+import copy
 import pytest
+from ups_panel.calibration import normalize_config
 from ups_panel.power import PowerEstimator, BASE_GAIN, CHARGE_GAIN
 from ups_panel.protocol import parse_frame
 from ups_panel.storage import Store
@@ -106,3 +108,50 @@ def test_invalid_power_inputs_never_publish_nonfinite_estimates(field, value):
     else: s['timestamp'] = value
     assert e.update(s)['ac_input_estimate_w'] is None
     assert s['ac_estimate_quality'] == 'invalid_data'
+
+
+@pytest.mark.parametrize('fixture', ['online.hex', 'charging-local.hex', 'battery-local.hex'])
+def test_custom_coefficients_apply_by_measurement_point_without_changing_raw_data(fixture):
+    config = normalize_config({'schema': 1, 'profile': 'custom', 'coefficients': {
+        'base_gain': 2, 'charge_gain': 3, 'battery_gain': 4}})
+    estimator = PowerEstimator(config=config)
+    for timestamp in (100, 102, 104, 106):
+        original = sample(fixture, timestamp)
+        preserved = copy.deepcopy(original)
+        result = estimator.update(original)
+        for key, value in preserved.items():
+            assert result[key] == value
+    assert result['calibration_profile'] == 'custom'
+    assert result['calibration_coefficients'] == config['coefficients']
+    assert result['calibration_revision'] == config['revision']
+    assert result['calibration_verified'] is False
+    if result['mode'] == 'battery':
+        assert result['battery_energy_estimate_w'] == pytest.approx(
+            result['battery_discharge_power_candidate_w'] * 4, abs=.01)
+        assert result['battery_estimate_quality'] == 'custom_unverified'
+        assert config['revision'] in result['battery_estimate_basis']
+        assert result['ac_input_estimate_w'] is None
+    else:
+        charge = result['battery_charge_power_candidate_w'] if result['mode'] == 'charging' else 0
+        assert result['ac_input_estimate_w'] == pytest.approx(
+            result['raw_fields']['byte_28'] * 2 + charge * 3, abs=.01)
+        assert result['ac_estimate_quality'] == 'custom_unverified'
+        assert config['revision'] in result['ac_estimate_model']
+        assert result['battery_energy_estimate_w'] is None
+
+
+def test_custom_never_borrows_local_validation_range_and_keeps_voltage_guard():
+    config = {'schema': 1, 'profile': 'custom', 'coefficients': {
+        'base_gain': BASE_GAIN, 'charge_gain': CHARGE_GAIN, 'battery_gain': 1}}
+    estimator = PowerEstimator(config=config)
+    for timestamp in (100, 102, 104, 106):
+        value = sample('online.hex', timestamp)
+        value['raw_fields']['byte_28'] = 60
+        result = estimator.update(value)
+    assert 57 <= result['ac_input_estimate_w'] <= 79
+    assert result['ac_estimate_quality'] == 'custom_unverified'
+    bad_voltage = sample('online.hex', 108)
+    bad_voltage['input_voltage'] = 12
+    assert estimator.update(bad_voltage)['ac_input_estimate_w'] is None
+    assert bad_voltage['ac_estimate_quality'] == 'unsupported_voltage'
+    assert estimator.update(sample('online.hex', 110))['ac_estimate_quality'] == 'warming_up'

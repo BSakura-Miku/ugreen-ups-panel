@@ -17,6 +17,7 @@
 - 查看外部供电、充电与电池供电状态。
 - 查看电量、输入/输出电压、电池组与四节电芯电压、电芯压差。
 - 查看历史曲线、供电与连接事件，导出 CSV。
+- 在网页切换功率校准配置、查看公式和系数，保存自定义系数。
 - 查看硬件资料、NUT 状态与采集诊断。
 
 功率相关字段仍有协议解释和测点限制；可选经验模型默认关闭（校准配置 `none`），不套用开发样机系数，详见[功率校准](docs/calibration.md)。
@@ -89,7 +90,7 @@ services:
 
 最后在浏览器打开 **`http://NAS_IP:9086`**，将 `NAS_IP` 替换为 NAS 的局域网地址。
 
-采集器只需首次安装；日常更新面板不用重新安装。
+采集器首次安装后会自动运行；日常只更新面板时无需重新安装。升级到 v0.4.0 的旧用户还需按下方说明更新一次采集器。
 
 ## 更新
 
@@ -100,13 +101,36 @@ cd /volume1/docker/ugreen-ups-panel
 sudo docker compose pull && sudo docker compose up -d
 ```
 
-默认使用 `bsakuramiku/ugreen-ups-panel:latest`。版本变更见 [Release](https://github.com/BSakura-Miku/ugreen-ups-panel/releases)；只有说明要求更新采集器时，才更新对应脚本并重新安装。
+默认使用 `bsakuramiku/ugreen-ups-panel:latest`。版本变更见 [Release](https://github.com/BSakura-Miku/ugreen-ups-panel/releases)。
+
+**从旧版本升级到 v0.4.0**，需更新一次宿主机采集器，网页保存的校准配置才能生效。将下方 `/volume1/docker/ugreen-ups-panel` 改为现有项目路径后执行；源码会下载到临时目录，安装结束后清理，保留原 `data` 与 `docker-compose.yaml`：
+
+```sh
+(
+  set -eu
+  tmp_dir="$(mktemp -d)"
+  trap 'rm -rf "$tmp_dir"' EXIT
+  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.4.0 -o "$tmp_dir/source.tar.gz"
+  tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir"
+  sudo sh "$tmp_dir/scripts/install-collector.sh" --data-dir /volume1/docker/ugreen-ups-panel/data
+  sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml pull
+  sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml up -d
+)
+```
+
+## 网页功率校准
+
+打开网页中的**功率校准**，可查看当前生效配置、三个精确系数及计算公式，并选择 `none`（关闭估算）、`local-19v-v1`（开发样机配置）或 `custom`（自定义）。默认仍为 `none`。
+
+自定义时，`base_gain` 与 `battery_gain` 大于 `0`、不超过 `10`；`charge_gain` 为 `0`–`10`。这些范围只是输入限制，**自定义配置始终标为未独立验证**，不会因保存成功而获得精度保证。
+
+页面分别显示“已保存”和“已生效”；需等采集器用新配置生成新鲜数据后才算生效。配置保存在已有的 `./data/calibration.json`，无需增加 Compose 参数。原始读数和已有历史保留，不同校准版本的历史分开统计。模型仍使用 18–20 V 交流输入限制与 8 秒平滑，详见[功率校准说明](docs/calibration.md)。
 
 ## 配置与数据
 
 - 默认访问端口为 `9086`。需要更改端口或镜像版本时，直接编辑 `docker-compose.yaml`，再运行 `docker compose up -d`。
 - Compose 自动读取 `docker-compose.yaml`，无需顶层 `name`；项目名默认来自部署目录名称，按上述步骤安装时为 `ugreen-ups-panel`。
-- 历史数据库保存在项目目录的 `./data/history.sqlite`，重建容器会保留历史。请保留并备份 `data` 目录。
+- 历史数据库保存在 `./data/history.sqlite`，网页校准配置保存在 `./data/calibration.json`。重建容器会保留这些文件，请保留并备份整个 `data` 目录。
 - 容器只读访问宿主机采集快照；采集器与原有 UPS 服务同时运行。
 
 数据流、历史存储和备份细节见[架构文档](docs/architecture.md)。

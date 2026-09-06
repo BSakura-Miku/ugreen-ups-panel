@@ -11,7 +11,7 @@ import time
 from .power import finite_number
 
 METRICS = ('battery_energy_estimate_w', 'ac_input_estimate_w', 'battery_charge_current_candidate_a', 'battery_discharge_current_candidate_a', 'battery_charge_power_candidate_w', 'battery_discharge_power_candidate_w', 'soc', 'power_w', 'dc_power_estimate_w', 'input_voltage', 'output_voltage', 'adapter_input_voltage_v', 'ups_output_voltage_v', 'current', 'battery_voltage', 'cell_delta_mv')
-CONTEXT_FIELDS = ('calibration_profile', 'ac_estimate_model', 'battery_estimate_basis',
+CONTEXT_FIELDS = ('calibration_profile', 'calibration_revision', 'calibration_coefficients', 'ac_estimate_model', 'battery_estimate_basis',
                   'ac_estimate_quality', 'battery_estimate_quality', 'formula_version', 'decoder_version')
 MAX_PENDING_BUCKETS = 4096
 

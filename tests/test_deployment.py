@@ -43,14 +43,14 @@ def admin(tmp_path, monkeypatch):
 
     monkeypatch.setattr(module, 'command', command)
     def set_directory_owner(fd, uid, gid):
-        assert module.os.fstat(fd).st_ino == (module.test_source / 'data').stat().st_ino
+        assert module.os.fstat(fd).st_ino == module.test_expected_data.stat().st_ino
         ownership_calls.append((uid, gid))
     monkeypatch.setattr(module.os, 'fchown', set_directory_owner)
     module.test_validate_fresh = module.validate_fresh
     monkeypatch.setattr(module, 'validate_fresh', lambda started: None)
     source = tmp_path / 'source'
     (source / 'ups_panel').mkdir(parents=True)
-    for filename in ('__init__.py', 'collector.py', 'protocol.py', 'power.py', 'usbmon.py'):
+    for filename in ('__init__.py', 'collector.py', 'protocol.py', 'power.py', 'calibration.py', 'usbmon.py'):
         (source / 'ups_panel' / filename).write_text("VERSION = 'new'\n")
     (source / 'deploy').mkdir()
     for name, filename in [('service', 'ugreen-ups-collector.service'),
@@ -67,6 +67,7 @@ def admin(tmp_path, monkeypatch):
     configs['env'].write_text('UPS_NUT_TARGET=office@localhost\nUPS_CALIBRATION_PROFILE=local-19v-v1\n')
     configs['env'].chmod(0o640)
     module.test_source = source
+    module.test_expected_data = source / 'data'
     module.test_systemd = systemd
     module.test_calls = calls
     module.test_ownership_calls = ownership_calls
@@ -105,7 +106,8 @@ def test_unspecified_profile_preserves_existing_environment(admin):
     original = admin.CONFIGS['env'].read_text()
     old = (admin.BASE / 'current').readlink()
     admin.install(admin.test_source)
-    assert admin.CONFIGS['env'].read_text() == original
+    assert admin.CONFIGS['env'].read_text().startswith(original)
+    assert f'UPS_CALIBRATION_CONFIG="{admin.test_source}/data/calibration.json"' in admin.CONFIGS['env'].read_text()
     assert (admin.BASE / 'previous').readlink() == old
     assert (admin.BASE / 'current').resolve().name != 'old'
     assert admin.test_systemd == {'active': True, 'enabled': True}
@@ -240,5 +242,28 @@ def test_data_ownership_failure_leaves_existing_collector_untouched(admin, monke
     before = state(admin)
     with pytest.raises(PermissionError):
         admin.install(admin.test_source)
+    assert state(admin) == before
+    assert not any(call[0] == 'systemctl' for call in admin.test_calls)
+
+
+def test_temporary_source_upgrade_uses_explicit_data_and_preserves_it_for_next_install(admin):
+    data = admin.test_source.parent / 'existing deployment' / 'data'
+    data.mkdir(parents=True)
+    (data / 'history.sqlite').write_bytes(b'keep history')
+    (data / 'calibration.json').write_text('{"preserve": true}')
+    admin.test_expected_data = data
+    admin.install(admin.test_source, data_dir=data)
+    assert not (admin.test_source / 'data').exists()
+    assert json.dumps(str(data / 'calibration.json')) in admin.CONFIGS['env'].read_text()
+    admin.install(admin.test_source)
+    assert (data / 'history.sqlite').read_bytes() == b'keep history'
+    assert (data / 'calibration.json').read_text() == '{"preserve": true}'
+    assert not (admin.test_source / 'data').exists()
+
+
+def test_relative_data_directory_is_rejected_before_service_changes(admin):
+    before = state(admin)
+    with pytest.raises(ValueError, match='absolute path'):
+        admin.install(admin.test_source, data_dir=Path('relative/data'))
     assert state(admin) == before
     assert not any(call[0] == 'systemctl' for call in admin.test_calls)

@@ -65,3 +65,58 @@ main:focus{outline:none}
 #root{color:#eaf0e8;font-family:Inter,"SF Pro Display",-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;font-size:16px;line-height:normal}
 #root h1,#root h2,#root h3{color:inherit}
 #root .brand{color:#eaf0e8}
+
+.power-caption{display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap}
+.power-caption .power-calibration-link{display:flex;align-items:center;gap:9px;border:1px solid #485c3c;background:#233020;border-radius:8px;padding:10px 13px;margin:0;min-height:44px;max-width:100%}
+.power-calibration-link>span{overflow-wrap:anywhere}
+.power-calibration-link strong{display:flex;align-items:center;gap:4px;font-weight:500;margin-top:2px}
+.diagnostic-grid a{color:var(--lime)}
+.calibration-page{display:grid;gap:20px;min-width:0}
+.calibration-page .panel-heading{flex-wrap:wrap}
+.calibration-page .panel-heading h3{display:flex;align-items:center;gap:8px}
+.calibration-badge{font-size:12px;line-height:1.6;color:#c6f19a;background:#293624;border:1px solid #485c3c;border-radius:6px;padding:7px 10px;overflow-wrap:anywhere}
+.calibration-values{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;margin:22px 0 0}
+.calibration-values>div{display:block;padding:0 0 16px;min-width:0}
+.calibration-values dt{font-size:12px}
+.calibration-values dd{text-align:left;font-size:21px;font-variant-numeric:tabular-nums;line-height:1.5;margin-top:8px;overflow-wrap:anywhere}
+.calibration-caution{font-size:13px;line-height:1.8;color:#eaca95;margin:16px 0 0}
+.calibration-active .notice{margin:18px 0 0}
+.calibration-feedback{font-size:13px;line-height:1.8;margin-top:16px;color:#d1ddc7;overflow-wrap:anywhere}
+.calibration-feedback:empty{display:none}
+.calibration-success{display:flex;align-items:center;gap:7px;color:var(--lime)}
+.calibration-draft{font-size:12px;color:#eaca95}
+.calibration-fields{border:0;padding:0;margin:23px 0 0;min-width:0}
+.calibration-fields>label,.calibration-field>label{display:block;font-size:14px;margin-bottom:9px;color:#d4dfce}
+.calibration-fields select,.calibration-field input{width:100%;max-width:100%;min-width:0;color:#eaf0e8;background:#111818;border:1px solid #4d6050;border-radius:7px;min-height:46px;font:inherit;padding:10px 12px}
+.calibration-fields>select{max-width:460px}
+.calibration-field input{font-variant-numeric:tabular-nums}
+.calibration-field input:read-only{background:#202822;color:#b4c0ae}
+.calibration-field input:focus-visible{outline:2px solid var(--lime);outline-offset:3px}
+.calibration-inputs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;margin-top:20px}
+.calibration-field{min-width:0}
+.calibration-field>.muted{display:block;margin-top:7px}
+.calibration-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:21px}
+.calibration-save-actions{border-top:1px solid var(--line);padding-top:21px}
+.calibration-primary,.calibration-secondary{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:44px;border-radius:7px;padding:10px 15px;font-size:13px;line-height:1.5}
+.calibration-primary{background:var(--lime);color:#182014;font-weight:600}
+.calibration-secondary{background:#29362b;color:#d2e2c6;border:1px solid #455a3e}
+.calibration-page button:disabled{cursor:not-allowed;opacity:.5}
+.calibration-editor .notice{margin:20px 0 0}
+.calibration-formulas p{font-size:14px;line-height:1.9;color:#c6d1bf;overflow-wrap:anywhere}
+.calibration-formulas .muted{font-size:12px;color:var(--muted)}
+@media(max-width:1050px){.calibration-inputs{grid-template-columns:1fr}.calibration-values{gap:14px}.calibration-values dd{font-size:17px}}
+@media(max-width:560px){
+  .sidebar{height:108px;display:block;padding:8px 14px}
+  .sidebar .brand{width:max-content;height:29px;font-size:13px}
+  .sidebar .brand-icon{width:27px;height:27px}
+  .sidebar .brand-name{display:block}
+  .sidebar nav{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));width:100%;margin:6px 0 0;gap:2px}
+  .sidebar nav button{justify-content:center;text-align:center;padding:8px 3px;min-height:44px;font-size:12px}
+  main{margin-top:108px}
+  .calibration-values{grid-template-columns:1fr;gap:14px}
+  .calibration-values>div{display:block;padding-bottom:12px}
+  .calibration-values dd{margin:8px 0 0;text-align:left;font-size:16px;white-space:nowrap;overflow-wrap:normal}
+  .calibration-actions>button{flex:1 1 auto}
+  .calibration-actions>.muted{flex-basis:100%}
+  .power-caption .power-calibration-link{width:100%}
+}

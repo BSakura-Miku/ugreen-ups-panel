@@ -8,13 +8,16 @@ import os
 from pathlib import Path
 import sqlite3
 import time
+from urllib.parse import urlsplit
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .storage import CONTEXT_FIELDS, Store, METRICS
 from .power import finite_number
+from .calibration import (CalibrationError, DEFAULT_COEFFICIENTS, default_config,
+                          load_config, normalize_config, save_config)
 
 LOG = logging.getLogger('panel')
 
@@ -53,9 +56,14 @@ def load_snapshot(path, now=None):
             for key in ('formula_version', 'decoder_version'):
                 if key in sample and (type(sample[key]) is not int or sample[key] < 1):
                     raise ValueError('Invalid sample version')
-            for key in set(CONTEXT_FIELDS) - {'formula_version', 'decoder_version'}:
+            for key in set(CONTEXT_FIELDS) - {'formula_version', 'decoder_version', 'calibration_coefficients'}:
                 if sample.get(key) is not None and (not isinstance(sample[key], str) or len(sample[key]) > 128):
                     raise ValueError('Invalid calibration metadata')
+            if 'calibration_coefficients' in sample:
+                config = normalize_config({'schema': 1, 'profile': sample.get('calibration_profile'),
+                                           'coefficients': sample['calibration_coefficients']})
+                if sample.get('calibration_revision') != config['revision']:
+                    raise ValueError('Calibration revision does not match coefficients')
             if (not isinstance(sample.get('warnings', []), list)
                     or any(not isinstance(warning, str) for warning in sample.get('warnings', []))):
                 raise ValueError('Invalid warnings')
@@ -75,10 +83,12 @@ def load_snapshot(path, now=None):
                 'diagnostics': {'error': '尚未收到有效采集数据'}, 'read_error': type(exc).__name__}
 
 
-def create_app(snapshot=None, database=None, static=None):
+def create_app(snapshot=None, database=None, static=None, calibration=None):
     snapshot = snapshot or os.getenv('UPS_SNAPSHOT', '/run/ugreen-ups-panel/latest.json')
     database = database or os.getenv('UPS_DATABASE', '/data/history.sqlite')
     static = Path(static or os.getenv('UPS_STATIC', 'frontend/dist'))
+    calibration = Path(calibration or os.getenv('UPS_CALIBRATION_CONFIG') or Path(database).with_name('calibration.json'))
+    calibration_lock = asyncio.Lock()
     state = {'store': None, 'storage_error': None, 'last_success': 0}
 
     async def record():
@@ -136,6 +146,89 @@ def create_app(snapshot=None, database=None, static=None):
                 'storage_error': state['storage_error'],
                 'storage_dropped_buckets': state['store'].dropped_buckets if state['store'] else 0}
 
+    def calibration_status():
+        view = load_snapshot(snapshot)
+        metadata = view.get('calibration')
+        metadata = metadata if isinstance(metadata, dict) else {}
+        active = None
+        error = None
+        try:
+            if metadata.get('config') is not None:
+                active = normalize_config(metadata['config'])
+            else:
+                profile = (view.get('sample') or {}).get('calibration_profile')
+                if profile in ('none', 'local-19v-v1'):
+                    active = default_config(profile)
+        except CalibrationError:
+            error = '采集器的校准配置无效，请检查采集器。'
+        try:
+            desired = load_config(calibration) or active or default_config()
+        except CalibrationError:
+            desired = active or default_config()
+            error = '校准配置文件无法读取，可重新保存有效配置。'
+        if metadata.get('error'):
+            error = '采集器未能读取新配置，仍保留上一次有效配置。'
+        ready = bool(view['fresh'] and metadata.get('configurable') is True and active
+                     and (view.get('sample') or {}).get('calibration_revision') == active['revision'])
+        return {'schema': 1, 'defaults': DEFAULT_COEFFICIENTS, 'desired': desired,
+                'active': active, 'collector_ready': ready,
+                'pending': active is None or desired['revision'] != active['revision'],
+                'error': error}
+
+    @app.get('/api/calibration')
+    def get_calibration():
+        return calibration_status()
+
+    @app.put('/api/calibration')
+    async def put_calibration(request: Request):
+        # JSON plus a required custom header prevent cross-site HTML forms from
+        # writing settings. No cross-origin CORS permission is granted.
+        if (request.headers.get('x-ups-calibration') != '1'
+                or request.headers.get('content-type', '').split(';', 1)[0].strip().lower() != 'application/json'):
+            raise HTTPException(403, '请通过面板的功率校准页面保存。')
+        origin = request.headers.get('origin')
+        if origin is not None:
+            try:
+                parsed_origin = urlsplit(origin)
+            except ValueError:
+                raise HTTPException(403, '浏览器来源无效。') from None
+            # Compare the external authority carried in Host, not the backend
+            # transport scheme: a local TLS proxy may connect to us over HTTP.
+            # The required custom header, absent CORS permission and Fetch
+            # Metadata check below continue to reject cross-origin browser writes.
+            if (parsed_origin.scheme not in ('http', 'https') or parsed_origin.username is not None
+                    or parsed_origin.path not in ('', '/') or parsed_origin.query or parsed_origin.fragment
+                    or parsed_origin.netloc.casefold() != request.headers.get('host', '').casefold()):
+                raise HTTPException(403, '不允许跨站修改校准配置。')
+        if request.headers.get('sec-fetch-site') in ('cross-site', 'same-site'):
+            raise HTTPException(403, '请从当前面板页面保存配置。')
+        encoded = bytearray()
+        async for part in request.stream():
+            encoded.extend(part)
+            if len(encoded) > 4096:
+                raise HTTPException(413, '校准配置过大。')
+        try:
+            payload = json.loads(encoded)
+            if not isinstance(payload, dict) or set(payload) != {'profile', 'coefficients', 'expected_revision'}:
+                raise CalibrationError('Invalid calibration request')
+            if not isinstance(payload['expected_revision'], str):
+                raise CalibrationError('Invalid revision')
+            config = normalize_config({'schema': 1, 'profile': payload['profile'],
+                                       'coefficients': payload['coefficients']})
+        except (ValueError, TypeError, RecursionError, OverflowError):
+            raise HTTPException(400, '校准配置无效：交流基底和电池放电系数须大于 0 且不超过 10，回充补偿须在 0–10 之间。') from None
+        async with calibration_lock:
+            current = calibration_status()
+            if not current['collector_ready']:
+                raise HTTPException(503, '需要已更新并正常采集的宿主机采集器，请等待连接或更新采集器。')
+            if payload['expected_revision'] != current['desired']['revision']:
+                raise HTTPException(409, '配置已在其他页面改变，请重新载入后再保存。')
+            try:
+                await asyncio.to_thread(save_config, calibration, config)
+            except (CalibrationError, OSError):
+                raise HTTPException(503, '校准配置保存失败，请检查数据目录是否可写。') from None
+            return calibration_status()
+
     def store():
         if state['store'] is None or state['storage_error']:
             raise HTTPException(503, '历史记录暂不可用')
@@ -164,8 +257,11 @@ def create_app(snapshot=None, database=None, static=None):
         writer = csv.DictWriter(output, fieldnames=fields)
         writer.writeheader()
         for row in rows:
+            context = dict(row['context'])
+            if isinstance(context.get('calibration_coefficients'), dict):
+                context['calibration_coefficients'] = json.dumps(context['calibration_coefficients'], sort_keys=True, separators=(',', ':'))
             writer.writerow({'timestamp': row['timestamp'], 'mode': row['mode'], 'count': row['count'], **row['values'],
-                             **row['context'],
+                             **context,
                              'power_quality': 'rail18_times_current24_hypothesis_v2' if 'dc_power_estimate_w' in row['values'] else 'legacy_protocol_estimate_uncalibrated'})
         return Response('\ufeff' + output.getvalue(), media_type='text/csv; charset=utf-8',
                         headers={'Content-Disposition': 'attachment; filename="us3000-history.csv"'})
