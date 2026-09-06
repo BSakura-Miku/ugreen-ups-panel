@@ -251,6 +251,11 @@ assert all(point['context']['calibration_profile'] == 'none' for point in histor
 assert all('ac_input_estimate_w' not in point['values'] and 'battery_energy_estimate_w' not in point['values'] for point in history['points'])
 assert any('soc' in point['values'] and 'ups_output_voltage_v' in point['values'] for point in history['points'])
 assert get_json('/api/events'), 'Initial connection event was not recorded'
+annual = get_json('/api/history?hours=8760')
+assert annual['resolution_sec'] == 86400 and annual['points'], 'Daily history was not generated'
+sessions = get_json('/api/battery-sessions?days=365')
+assert sessions['recording_since'] is not None and sessions['capture_fresh']
+assert sessions['records'] == [] and sessions['summary']['confirmed_starts'] == 0
 csv_bytes, _ = get('/api/export.csv?hours=1')
 csv_rows = list(csv.DictReader(io.StringIO(csv_bytes.decode('utf-8-sig'))))
 assert csv_rows and all(row['calibration_profile'] == 'none' for row in csv_rows)

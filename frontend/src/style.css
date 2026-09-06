@@ -120,3 +120,56 @@ main:focus{outline:none}
   .calibration-actions>.muted{flex-basis:100%}
   .power-caption .power-calibration-link{width:100%}
 }
+
+.history-range{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px;margin-top:20px;max-width:100%}
+.history-range button{white-space:nowrap;min-width:0;padding:8px 4px;font-size:12px}
+.history-coverage{margin:12px 0 4px;color:var(--muted);font-size:11px;line-height:1.8;overflow-wrap:anywhere}
+.history-coverage p{margin:3px 0}
+@media(max-width:560px){.history-range{grid-template-columns:repeat(4,minmax(0,1fr))}.history-range button{font-size:12px}}
+
+.battery-sessions{margin-top:20px}
+.session-range{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:3px;margin-top:20px;max-width:580px}
+.session-range button{min-width:0;white-space:nowrap;font-size:12px;padding:8px 4px}
+.session-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:22px}
+.session-summary>div{background:#151d1b;border:1px solid #34432f;border-radius:9px;padding:17px;min-width:0}
+.session-summary>div>span{font-size:12px;color:#b1bdab}
+.session-summary strong{display:block;font-size:25px;font-weight:500;font-variant-numeric:tabular-nums;line-height:1.5;margin:12px 0 8px;overflow-wrap:anywhere}
+.session-summary strong small{font-size:12px;font-weight:400;margin-left:6px;color:#a5b59c}
+.session-summary p{margin:0;font-size:11px;line-height:1.8;color:var(--muted)}
+.session-summary-details{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#c2cfb9;margin:17px 0 12px}
+.session-scope{font-size:11px;line-height:1.8;color:var(--muted)}
+.session-scope p{margin:5px 0}
+.session-capture-note{color:#eaca95}
+.session-record-count{font-size:12px;line-height:1.8;color:#adbaaa;margin:20px 0 10px}
+.session-table{width:100%;border-collapse:collapse;table-layout:fixed}
+.session-table th{text-align:left;font-size:12px;color:#a0b199;font-weight:500;padding:12px 8px;border-bottom:1px solid var(--line)}
+.session-table td{vertical-align:top;padding:17px 8px;font-size:12px;line-height:1.8;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+.session-table tbody tr:last-child td{border-bottom:0}
+.session-table strong{font-weight:500;font-variant-numeric:tabular-nums}
+.session-table small{display:block;font-size:10px;color:var(--muted);line-height:1.8}
+.session-table .session-inline-unit{display:inline;margin-left:4px}
+.session-time{display:flex;flex-direction:column;font-variant-numeric:tabular-nums}
+.session-time>span:last-child{font-size:11px;color:var(--muted)}
+.session-statuses{display:flex;align-items:flex-start;gap:5px;flex-wrap:wrap}
+.session-status{font-size:11px;border-radius:4px;padding:2px 7px;white-space:nowrap;border:1px solid #48603b;color:#c7e7ac;background:#293624}
+.session-status.incomplete{border-color:#715936;background:#352d21;color:#eaca95}
+.session-status.ongoing{border-color:#3b596e;background:#1f303b;color:#b0d4ed}
+.session-quality{display:block;flex-basis:100%;font-size:10px;color:#acbca4;line-height:1.6}
+.session-mobile-label{display:none}
+.session-empty{padding:28px 10px;text-align:center;color:var(--muted);font-size:13px;line-height:1.8}
+.battery-sessions>.notice{margin-top:18px}
+.visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+@media(max-width:1150px){.session-summary strong{font-size:22px}}
+@media(max-width:760px){
+  .session-summary{grid-template-columns:1fr;gap:12px}
+  .session-summary strong{font-size:25px;margin:8px 0}
+  .session-table,.session-table tbody{display:block}
+  .session-table thead{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0,0,0,0)}
+  .session-table tbody{display:grid;gap:12px}
+  .session-table tr{display:block;background:#151d1b;border:1px solid var(--line);border-radius:9px;padding:6px 13px}
+  .session-table td{display:grid;grid-template-columns:70px minmax(0,1fr);gap:12px;padding:10px 0;min-width:0}
+  .session-table tbody tr:last-child td{border-bottom:1px solid var(--line)}
+  .session-table tr td:last-child{border-bottom:0!important}
+  .session-mobile-label{display:block;color:#9fb194;font-size:11px}
+  .session-range{grid-template-columns:repeat(3,minmax(0,1fr))}
+}

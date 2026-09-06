@@ -16,9 +16,15 @@ A UGREEN US3000 dashboard for power state, battery charge, cell voltages, and hi
 
 - External power, charging, and battery power states.
 - Charge percentage, input/output voltage, pack voltage, four cell voltages, and cell voltage difference.
-- History charts, power and connection events, and CSV export.
+- Up to one year of history, power and connection events, and CSV export with averages and extrema.
+- Mean and peak cell voltage difference, with the actual dates covered by recorded data.
+- Individual battery-power records with start/end times, observed duration, start/end charge, occurrence counts, and net charge decrease.
 - Web controls for calibration profiles, exact coefficients, formulas, and custom coefficients.
 - Hardware references, NUT status, and capture diagnostics.
+
+Trend ranges include 1 hour, 24 hours, 7 days, 30 days, 90 days, half a year (180 days), and one year (365 days). Ranges longer than 90 days use daily aggregates. Charts keep the entire selected time range, leaving unrecorded periods and gaps empty; a few days of data remain a few days of data.
+
+Battery-power records begin with the first valid sample after upgrading; older events and aggregates are not converted into session details. The default range is 90 days, with choices from 7 days to one year. Missing transitions or interrupted capture produce incomplete records. Net charge decrease is measured in percentage points and may be negative when charge readings rise; it is not energy in Wh or a battery cycle count.
 
 Power fields still have protocol and measurement-location limitations. The optional empirical model is disabled by default (calibration profile `none`), so coefficients from the development unit are not applied. See [power calibration](docs/calibration.md).
 
@@ -46,11 +52,11 @@ The installer sets up the host collector and prepares the data directory. Compos
 
 Open `http://NAS_IP:9086`, replacing `NAS_IP` with your NAS's LAN address.
 
-The collector runs automatically after installation. Routine dashboard updates do not require reinstalling it; existing users upgrading to v0.4.0 must update the collector once as described below.
+The collector runs automatically after installation. Upgrading to v0.5.0 with an existing v0.4.0 collector requires only a dashboard container update; no collector reinstall is needed.
 
 ## Update
 
-Run from the project directory:
+**v0.5.0 supports the existing v0.4.0 collector.** Run from the project directory:
 
 ```sh
 docker compose pull && docker compose up -d
@@ -58,7 +64,7 @@ docker compose pull && docker compose up -d
 
 The default image is `bsakuramiku/ugreen-ups-panel:latest`. Check [release notes](https://github.com/BSakura-Miku/ugreen-ups-panel/releases) for changes.
 
-**Upgrading an existing installation to v0.4.0 requires one collector update** before calibration saved in the dashboard can take effect. Replace `/volume1/docker/ugreen-ups-panel` below with your existing project path. Source files are downloaded into a temporary directory and removed afterward; your existing `data` and `docker-compose.yaml` are retained.
+**If the collector is still v0.3.x or earlier, update it once** before calibration saved in the dashboard can take effect. Replace `/volume1/docker/ugreen-ups-panel` below with your existing project path. Source files are downloaded into a temporary directory and removed afterward; your existing `data` and `docker-compose.yaml` are retained.
 
 ```sh
 (
@@ -86,6 +92,7 @@ The dashboard distinguishes saved settings from active settings. A configuration
 - The default port is `9086`. To change the port or image version, edit `docker-compose.yaml`, then run `docker compose up -d`.
 - Compose automatically reads `docker-compose.yaml`; the top-level `name` field is optional. By default, the project name comes from the deployment directory, so the steps above use `ugreen-ups-panel`.
 - History lives in `./data/history.sqlite`, and web calibration settings live in `./data/calibration.json`. Both survive container recreation. Keep and back up the whole `data` directory.
+- History retains 10-second aggregates for 7 days, minute aggregates for 90 days, and daily aggregates for 365 days. Upgrading builds daily aggregates from the older records still present in the database; previously expired and deleted records cannot be recovered.
 - The container reads host snapshots through a read-only mount. The collector runs alongside the existing UPS service.
 
 See [architecture](docs/architecture.md) for data flow, history storage, and backup details.

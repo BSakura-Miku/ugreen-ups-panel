@@ -235,7 +235,7 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
         return state['store']
 
     @app.get('/api/history')
-    def history(hours: int = Query(24, ge=1, le=2160)):
+    def history(hours: int = Query(24, ge=1, le=8760)):
         try:
             return store().history(hours)
         except (sqlite3.Error, ValueError, TypeError, KeyError):
@@ -248,11 +248,22 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
         except (sqlite3.Error, ValueError, TypeError, KeyError):
             raise HTTPException(503, '事件查询失败')
 
+    @app.get('/api/battery-sessions')
+    def battery_sessions(days: int = Query(90, ge=1, le=365), limit: int = Query(50, ge=1, le=500)):
+        try:
+            view = load_snapshot(snapshot)
+            return store().battery_history(days, limit, now=view['server_time'], capture_fresh=view['fresh'])
+        except (sqlite3.Error, ValueError, TypeError, KeyError):
+            raise HTTPException(503, '电池供电记录查询失败')
+
     @app.get('/api/export.csv')
-    def export(hours: int = Query(24, ge=1, le=2160)):
+    def export(hours: int = Query(24, ge=1, le=8760)):
         rows = history(hours)['points']
-        fields = ['timestamp', 'mode', 'count', *METRICS, 'cell_1', 'cell_2', 'cell_3', 'cell_4',
-                  'power_quality', *CONTEXT_FIELDS, 'provenance']
+        metrics = [*METRICS, 'cell_1', 'cell_2', 'cell_3', 'cell_4']
+        extrema = [f'{metric}_{edge}' for metric in metrics for edge in ('min', 'max')]
+        fields = ['timestamp', 'mode', 'count', *metrics,
+                  'power_quality', *CONTEXT_FIELDS, 'provenance', *extrema,
+                  'first', 'last', 'bucket_start', 'bucket_end', 'partial_range']
         output = io.StringIO()
         writer = csv.DictWriter(output, fieldnames=fields)
         writer.writeheader()
@@ -260,8 +271,11 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
             context = dict(row['context'])
             if isinstance(context.get('calibration_coefficients'), dict):
                 context['calibration_coefficients'] = json.dumps(context['calibration_coefficients'], sort_keys=True, separators=(',', ':'))
+            ranges = {f'{metric}_{edge}': row[edge][metric]
+                      for metric in metrics for edge in ('min', 'max') if metric in row[edge]}
+            bounds = {key: row[key] for key in ('first', 'last', 'bucket_start', 'bucket_end', 'partial_range')}
             writer.writerow({'timestamp': row['timestamp'], 'mode': row['mode'], 'count': row['count'], **row['values'],
-                             **context,
+                             **context, **ranges, **bounds,
                              'power_quality': 'rail18_times_current24_hypothesis_v2' if 'dc_power_estimate_w' in row['values'] else 'legacy_protocol_estimate_uncalibrated'})
         return Response('\ufeff' + output.getvalue(), media_type='text/csv; charset=utf-8',
                         headers={'Content-Disposition': 'attachment; filename="us3000-history.csv"'})

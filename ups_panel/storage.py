@@ -1,4 +1,4 @@
-"""Bounded SQLite aggregates: 10 seconds/7 days, 60 seconds/90 days."""
+"""Bounded SQLite aggregates: 10 seconds/7 days, 60 seconds/90 days, UTC days/365 days."""
 import json
 import math
 from contextlib import contextmanager
@@ -9,11 +9,13 @@ from threading import RLock
 import time
 
 from .power import finite_number
+from .battery_sessions import BatterySessions
 
 METRICS = ('battery_energy_estimate_w', 'ac_input_estimate_w', 'battery_charge_current_candidate_a', 'battery_discharge_current_candidate_a', 'battery_charge_power_candidate_w', 'battery_discharge_power_candidate_w', 'soc', 'power_w', 'dc_power_estimate_w', 'input_voltage', 'output_voltage', 'adapter_input_voltage_v', 'ups_output_voltage_v', 'current', 'battery_voltage', 'cell_delta_mv')
 CONTEXT_FIELDS = ('calibration_profile', 'calibration_revision', 'calibration_coefficients', 'ac_estimate_model', 'battery_estimate_basis',
                   'ac_estimate_quality', 'battery_estimate_quality', 'formula_version', 'decoder_version')
 MAX_PENDING_BUCKETS = 4096
+DAY = 86400
 
 
 def synchronized(method):
@@ -65,6 +67,7 @@ class Store:
                 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
             ''')
             self._migrate(db)
+            self.battery_sessions = BatterySessions(db)
         self.pending = {}
         self.dropped_buckets = 0
         self.last_ts = float(self.get_meta('last_ts') or 0)
@@ -99,7 +102,84 @@ class Store:
             db.execute('''INSERT INTO samples SELECT resolution,bucket,first,last,count,
                 mode,metrics,'{"provenance":"legacy_unrecorded"}' FROM samples_v1''')
             db.execute('DROP TABLE samples_v1')
+        # Keep schema version 2 readable by previous releases. They leave daily
+        # rows and this checkpoint untouched, so a later upgrade can catch up.
+        db.execute('''CREATE TABLE IF NOT EXISTS daily_rollup_checkpoint (
+            bucket INTEGER, first REAL, last REAL, count INTEGER,
+            mode TEXT, metrics TEXT, context TEXT NOT NULL,
+            PRIMARY KEY(bucket,mode,context))''')
+        self._rollup_daily(db)
         db.execute('PRAGMA user_version=2')
+
+    @staticmethod
+    def _rollup_daily(db):
+        """Add only new minute contributions, in the same transaction as their source rows.
+
+        The last processed minute can be appended to by this or an older release.
+        Its checkpoint supplies the previous sum/count so those contributions are
+        not counted twice. Reusing the full minute's min/max is safe: extrema are
+        idempotent and the earlier observations already belong to the same day.
+        """
+        row = db.execute('SELECT value FROM meta WHERE key=?', ('daily_rollup_cursor',)).fetchone()
+        cursor = float(row[0]) if row else None
+        cursor_bucket = int(cursor // 60 * 60) if cursor is not None else None
+        if cursor is None:
+            rows = db.execute('''SELECT bucket,first,last,count,mode,metrics,context
+                                 FROM samples WHERE resolution=60 ORDER BY bucket,first''')
+        else:
+            rows = db.execute('''SELECT bucket,first,last,count,mode,metrics,context
+                                 FROM samples WHERE resolution=60 AND bucket>=? AND last>?
+                                 ORDER BY bucket,first''', (cursor_bucket, cursor))
+        checkpoint = {(bucket, mode, context): (count, json.loads(values))
+                      for bucket, count, mode, values, context in db.execute(
+                          'SELECT bucket,count,mode,metrics,context FROM daily_rollup_checkpoint')}
+        additions = {}
+        latest = None
+        for bucket, first, last, count, mode, encoded, context in rows:
+            latest = last if latest is None else max(latest, last)
+            values = json.loads(encoded)
+            previous = checkpoint.get((bucket, mode, context)) if bucket == cursor_bucket else None
+            if previous:
+                previous_count, previous_values = previous
+                count -= previous_count
+                if count < 0:
+                    raise ValueError('Minute history no longer matches its daily checkpoint')
+                delta = {}
+                for key, value in values.items():
+                    before = previous_values.get(key, [0, 0, value[2], value[3]])
+                    metric_count = value[1] - before[1]
+                    if metric_count < 0:
+                        raise ValueError('Minute metric no longer matches its daily checkpoint')
+                    if metric_count:
+                        delta[key] = [value[0] - before[0], metric_count, value[2], value[3]]
+                values = delta
+            if count == 0:
+                continue
+            key = (int(bucket // DAY * DAY), mode, context)
+            item = additions.setdefault(key, {'first': first, 'last': last, 'count': 0, 'metrics': {}})
+            item['first'] = min(item['first'], first)
+            item['last'] = max(item['last'], last)
+            item['count'] += count
+            item['metrics'] = combine(item['metrics'], values)
+        if latest is None:
+            return
+        for (bucket, mode, context), entry in additions.items():
+            previous = db.execute('''SELECT first,last,count,metrics FROM samples
+                                     WHERE resolution=? AND bucket=? AND mode=? AND context=?''',
+                                  (DAY, bucket, mode, context)).fetchone()
+            values = combine(json.loads(previous[3]), entry['metrics']) if previous else entry['metrics']
+            db.execute('INSERT OR REPLACE INTO samples VALUES(?,?,?,?,?,?,?,?)',
+                       (DAY, bucket, min(previous[0], entry['first']) if previous else entry['first'],
+                        max(previous[1], entry['last']) if previous else entry['last'],
+                        (previous[2] if previous else 0) + entry['count'], mode, json.dumps(values), context))
+        # The source rows and cursor/checkpoint commit together, including during
+        # upgrade. A restart cannot observe a cursor ahead of its daily totals.
+        last_bucket = int(latest // 60 * 60)
+        db.execute('DELETE FROM daily_rollup_checkpoint')
+        db.execute('''INSERT INTO daily_rollup_checkpoint
+                      SELECT bucket,first,last,count,mode,metrics,context
+                      FROM samples WHERE resolution=60 AND bucket=?''', (last_bucket,))
+        db.execute('INSERT OR REPLACE INTO meta VALUES(?,?)', ('daily_rollup_cursor', str(latest)))
 
     def get_meta(self, key):
         with self.connect() as db:
@@ -110,6 +190,7 @@ class Store:
     def ingest(self, view, now=None):
         now = time.time() if now is None else now
         sample = view.get('sample')
+        self.battery_sessions.ingest(view)
         state = ('online:' + sample['mode']) if view['fresh'] else 'offline'
         if state != self.last_state:
             with self.connect() as db:
@@ -152,29 +233,41 @@ class Store:
                 db.execute('INSERT OR REPLACE INTO samples VALUES(?,?,?,?,?,?,?,?)',
                            (resolution, bucket, min(row[0], entry['first']) if row else entry['first'],
                             entry['last'], (row[2] if row else 0) + entry['count'], mode, json.dumps(values), context))
+            self._rollup_daily(db)
+            self.battery_sessions.write(db)
             db.execute('INSERT OR REPLACE INTO meta VALUES(?,?)', ('last_ts', str(self.last_ts)))
         self.pending.clear()
+        self.battery_sessions.committed()
         self.last_flush = time.monotonic()
 
     @synchronized
     def prune(self, now):
         with self.connect() as db:
+            self._rollup_daily(db)
             db.execute('DELETE FROM samples WHERE (resolution=10 AND bucket<?) OR (resolution=60 AND bucket<?)',
                        (now - 7 * 86400, now - 90 * 86400))
+            # Keep the oldest UTC day while any part still overlaps the rolling
+            # retention window; discarding it early would lose up to one day.
+            db.execute('DELETE FROM samples WHERE resolution=? AND bucket+?<=?',
+                       (DAY, DAY, now - 365 * DAY))
             db.execute('DELETE FROM events WHERE timestamp<?', (now - 180 * 86400,))
+            self.battery_sessions.prune(db, now)
 
     def history(self, hours, now=None):
         now = time.time() if now is None else now
-        resolution = 10 if hours <= 24 else 60
+        requested_start = now - hours * 3600
+        resolution = 10 if hours <= 24 else 60 if hours <= 2160 else DAY
         stride = max(resolution, math.ceil(hours * 3600 / 1200 / resolution) * resolution)
+        start_bucket = math.floor(requested_start / DAY) * DAY if resolution == DAY else requested_start
         with self.connect() as db:
             rows = db.execute('SELECT bucket,first,last,count,mode,metrics,context FROM samples WHERE resolution=? AND bucket>=? AND bucket<=? ORDER BY bucket,first',
-                              (resolution, now - hours * 3600, now)).fetchall()
+                              (resolution, start_bucket, now)).fetchall()
         merged = {}
         for bucket, first, last, count, mode, values, context in rows:
             key = (int(bucket // stride * stride), mode, context)
             item = merged.setdefault(key, {'timestamp': key[0], 'first': first, 'last': last, 'count': 0,
                                           'mode': mode, 'context': json.loads(context), 'metrics': {}})
+            item['first'] = min(item['first'], first)
             item['last'] = max(item['last'], last)
             item['count'] += count
             item['metrics'] = combine(item['metrics'], json.loads(values))
@@ -183,10 +276,22 @@ class Store:
             item['min'] = {k: v[2] for k, v in item['metrics'].items()}
             item['max'] = {k: v[3] for k, v in item['metrics'].items()}
             item['values'] = {k: round(v[0] / v[1], 4) for k, v in item.pop('metrics').items()}
+            item['bucket_start'] = item['timestamp']
+            item['bucket_end'] = item['timestamp'] + stride
+            item['partial_range'] = item['bucket_start'] < requested_start or item['bucket_end'] > now
             result.append(item)
-        return {'resolution_sec': stride, 'points': sorted(result, key=lambda item: (item['timestamp'], item['first']))}
+        return {'resolution_sec': stride, 'requested_start': requested_start, 'requested_end': now,
+                'available_start': min((item['first'] for item in result), default=None),
+                'available_end': max((item['last'] for item in result), default=None),
+                'points': sorted(result, key=lambda item: (item['timestamp'], item['first']))}
 
     def events(self, limit=100):
         with self.connect() as db:
             return [dict(zip(('timestamp', 'kind', 'detail'), row)) for row in db.execute(
                 'SELECT timestamp,kind,detail FROM events ORDER BY id DESC LIMIT ?', (limit,))]
+
+    @synchronized
+    def battery_history(self, days, limit=50, now=None, capture_fresh=True):
+        now = time.time() if now is None else now
+        with self.connect() as db:
+            return self.battery_sessions.history(db, days, limit, now, capture_fresh)
