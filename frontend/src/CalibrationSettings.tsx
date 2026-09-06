@@ -12,10 +12,21 @@ const fields = [
   { key: 'charge_gain', label: '回充补偿', range: '0 至 10' },
   { key: 'battery_gain', label: '电池放电', range: '大于 0，且不超过 10' },
 ] as const;
-type Draft = { profile: CalibrationProfile; values: Record<keyof CalibrationCoefficients, string>; revision: string };
+type CoefficientValues = Record<keyof CalibrationCoefficients, string>;
+type Draft = { profile: CalibrationProfile; values: CoefficientValues; displayValues: CoefficientValues; revision: string };
+function formatCoefficient(value: number): string {
+  const rounded = Number(value.toFixed(4));
+  return rounded === 0 && value !== 0 ? value.toExponential(3).replace(/\.?0+e/, 'e') : String(rounded);
+}
 function draftFrom(config: CalibrationConfig, defaults: CalibrationCoefficients): Draft {
   const values = config.coefficients || defaults;
-  return { profile: config.profile, values: { base_gain: String(values.base_gain), charge_gain: String(values.charge_gain), battery_gain: String(values.battery_gain) }, revision: config.revision };
+  return {
+    profile: config.profile,
+    // Keep the full value until the user edits this field; display rounding must not change a saved coefficient.
+    values: { base_gain: String(values.base_gain), charge_gain: String(values.charge_gain), battery_gain: String(values.battery_gain) },
+    displayValues: { base_gain: formatCoefficient(values.base_gain), charge_gain: formatCoefficient(values.charge_gain), battery_gain: formatCoefficient(values.battery_gain) },
+    revision: config.revision,
+  };
 }
 
 class CalibrationRequestError extends Error {
@@ -146,7 +157,7 @@ export default function CalibrationSettings() {
   return <section className="calibration-page" aria-label="功率校准设置">
     <article className="panel calibration-active">
       <div className="panel-heading"><div><h3>{collectorReady ? '当前已生效' : data ? '最近一次采集器报告' : '采集器报告'}</h3><p>这里显示采集器报告的实际配置。</p></div><span className="calibration-badge">{active ? calibrationLabel(active.profile) : '尚未确认'}</span></div>
-      {active?.coefficients ? <dl className="calibration-values">{fields.map(field => <div key={field.key}><dt>{field.label}</dt><dd>{String(active.coefficients![field.key])}</dd></div>)}</dl> : <p className="muted">{active?.profile === 'none' ? '功率估算未启用，当前没有生效的校准系数。' : '等待采集器返回实际配置与系数。'}</p>}
+      {active?.coefficients ? <><dl className="calibration-values">{fields.map(field => <div key={field.key}><dt>{field.label}</dt><dd title={String(active.coefficients![field.key])}>{formatCoefficient(active.coefficients![field.key])}</dd></div>)}</dl><p className="muted">系数最多显示 4 位小数，计算保留完整精度。</p></> : <p className="muted">{active?.profile === 'none' ? '功率估算未启用，当前没有生效的校准系数。' : '等待采集器返回实际配置与系数。'}</p>}
       {active?.profile === 'custom' && <p className="calibration-caution">自定义系数未经过独立验证，估算值仅供参考。</p>}
       {data && !reportFresh && <p className="notice" role="status">配置连接中断或报告已过期，暂不能确认当前配置或保存。上方保留最近一次报告，正在编辑的内容不会丢失。</p>}
       {data && reportFresh && !data.collector_ready && <p className="notice" role="status">当前无法确认采集器可用，暂不能保存。请更新宿主机采集器；已更新时请等待 UPS 连接恢复。{active ? ' 上方为最近一次报告的配置。' : ''}</p>}
@@ -169,10 +180,10 @@ export default function CalibrationSettings() {
           <p className="muted">{draft.profile === 'none' ? '保存后停止功率估算，电量、电压和设备电流继续显示。' : draft.profile === 'custom' ? '自定义系数未独立验证。下方为待保存数值，保存并经采集器确认后才会生效。' : '使用开发样机的经验参数；相同型号也可能存在差异。保存并经采集器确认后才会生效。'}</p>
           {draft.profile !== 'none' && <div className="calibration-inputs">{fields.map(field => <div className="calibration-field" key={field.key}>
             <label htmlFor={`calibration-${field.key}`}>{field.label}</label>
-            <input id={`calibration-${field.key}`} type="text" inputMode="decimal" autoComplete="off" spellCheck={false} aria-describedby={`calibration-${field.key}-hint`} readOnly={draft.profile !== 'custom'} value={draft.profile === 'local-19v-v1' ? String(data.defaults[field.key]) : draft.values[field.key]} onChange={event => edit({ ...draft, values: { ...draft.values, [field.key]: event.target.value } })} />
+            <input id={`calibration-${field.key}`} type="text" inputMode="decimal" autoComplete="off" spellCheck={false} aria-describedby={`calibration-${field.key}-hint`} readOnly={draft.profile !== 'custom'} value={draft.profile === 'local-19v-v1' ? formatCoefficient(data.defaults[field.key]) : draft.displayValues[field.key]} onChange={event => edit({ ...draft, values: { ...draft.values, [field.key]: event.target.value }, displayValues: { ...draft.displayValues, [field.key]: event.target.value } })} />
             <span id={`calibration-${field.key}-hint`} className="muted">{field.range}</span>
           </div>)}</div>}
-          <div className="calibration-actions"><button type="button" className="calibration-secondary" onClick={() => edit({ ...draft, profile: 'custom', values: draftFrom({ ...data.desired, coefficients: data.defaults }, data.defaults).values })}>使用样机值填充</button><span className="muted">仅填入表单，需要另行保存。</span></div>
+          <div className="calibration-actions"><button type="button" className="calibration-secondary" onClick={() => edit(draftFrom({ ...data.desired, profile: 'custom', coefficients: data.defaults, revision: draft.revision }, data.defaults))}>使用样机值填充</button><span className="muted">仅填入表单，需要另行保存。</span></div>
         </fieldset>
         {(conflict || changedElsewhere) && <p className="notice" role="status">配置已发生变化，当前输入已保留。请重新载入最新配置后再调整。</p>}
         <div className="calibration-actions calibration-save-actions">
