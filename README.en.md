@@ -12,7 +12,7 @@ An unofficial, read-only UGREEN US3000 dashboard for Linux NAS systems. It displ
 
 The running dashboard does not depend on a smart plug, Home Assistant, or an external CDN.
 
-Starting with 0.3.1, normal installations use a [prebuilt Docker Hub image](https://hub.docker.com/r/bsakuramiku/ugreen-ups-panel) and a [lightweight deployment package](https://github.com/BSakura-Miku/ugreen-ups-panel/releases). You do not need Node.js, frontend application sources, or an on-NAS image build to deploy it.
+Deploy the [prebuilt Docker Hub image](https://hub.docker.com/r/bsakuramiku/ugreen-ups-panel) using Compose configuration and host collector scripts from the [GitHub repository](https://github.com/BSakura-Miku/ugreen-ups-panel). The NAS does not need Node.js, frontend compilation, or a local image build. [GitHub Releases](https://github.com/BSakura-Miku/ugreen-ups-panel/releases) provide version notes; installation does not depend on a separately packaged archive.
 
 This is a community project, with no affiliation with or certification from UGREEN. **The NAS's existing UPS service remains responsible for power-loss protection and shutdown. This project does not provide power protection.**
 
@@ -32,7 +32,7 @@ There are no remote-shutdown, smart-plug control, UPS parameter-write, or automa
 
 ## Compatibility and prerequisites
 
-- A Linux host connected to the UPS, systemd, Python 3.10+, and Docker Compose v2. Images support `linux/amd64` and `linux/arm64`; actual UPS/NAS hardware validation still covers one x86_64 NAS, US3000, and 19 V adapter. An ARM image starting successfully does not establish real UPS capture compatibility.
+- A Linux host connected to the UPS, systemd, Python 3.10+, Git, and Docker Compose v2. Images support `linux/amd64` and `linux/arm64`; actual UPS/NAS hardware validation still covers one x86_64 NAS, US3000, and 19 V adapter. An ARM image starting successfully does not establish real UPS capture compatibility.
 - A kernel with usbmon support and working `/dev/usbmonN` devices. The collector uses the binary interface; the dashboard does not need debugfs or USB devices mounted into its container.
 - An existing NUT/system UPS driver connected to the UPS and continuously reading complete private `0x71` reports. **NUT being able to display charge percentage does not prove that it reads these reports.** This project does not actively request them.
 - Device discovery matches USB VID:PID `2b89:ffff`. If several matching devices are attached, select one explicitly by serial number.
@@ -42,13 +42,11 @@ There are no remote-shutdown, smart-plug control, UPS parameter-write, or automa
 
 **Run these commands on the Linux NAS connected to the UPS.** Docker Desktop can build the dashboard image; it does not give macOS or another development computer access to USB telemetry on the NAS. Existing 0.3.0 users should first follow [history migration](#migrating-history-from-030), rather than creating an empty data directory with the new-install instructions.
 
-Choose an empty parent directory on persistent NAS storage, then download and extract the **deployment package**. It contains Compose configuration, the collector and installer, both READMEs, and necessary documentation assets. It does not contain frontend application sources or development dependencies.
+Choose a parent directory on persistent NAS storage where `ugreen-ups-panel` does not already exist, then clone the repository. Its Compose configuration and installation scripts are used for deployment. Although the checkout includes source code, a normal installation does not build it or install development dependencies.
 
 ```sh
-curl -fL https://github.com/BSakura-Miku/ugreen-ups-panel/releases/download/v0.3.1/ugreen-ups-panel-deploy-0.3.1.tar.gz -o ugreen-ups-panel-deploy-0.3.1.tar.gz
-tar -xzf ugreen-ups-panel-deploy-0.3.1.tar.gz
+git clone https://github.com/BSakura-Miku/ugreen-ups-panel.git
 cd ugreen-ups-panel
-sha256sum -c DEPLOYMENT_MANIFEST.sha256
 cp .env.example .env
 ```
 
@@ -127,7 +125,15 @@ Use `--calibration-profile none` to disable it again. The AC estimate includes e
 
 ## Migrating history from 0.3.0
 
-Version 0.3.0 used a Docker named volume for history by default; 0.3.1 uses `./data`. Starting the new Compose configuration points it at a different database location and **does not automatically bring the old history across**. Preserve the old Compose file, `.env`, image, and database backup, then extract the new deployment package into a new deployment directory. Create `.env` from `.env.example` there and transfer the required listener, port, and other settings without overwriting the old deployment.
+Version 0.3.0 used a Docker named volume for history by default; 0.3.1 uses `./data`. Starting the new Compose configuration points it at a different database location and **does not automatically bring the old history across**. Preserve the old Compose file, `.env`, image, and database backup, then clone the repository into a new, nonexistent directory without overwriting the old deployment:
+
+```sh
+git clone https://github.com/BSakura-Miku/ugreen-ups-panel.git ugreen-ups-panel-migration
+cd ugreen-ups-panel-migration
+cp .env.example .env
+```
+
+Transfer the required listener, port, and other settings into the new `.env` before continuing.
 
 On the NAS, identify the old dashboard container and the source mounted at its `/data`. Replace `OLD_PANEL_CONTAINER` below with the old dashboard container you have identified; do not select NUT or another service.
 
@@ -157,7 +163,7 @@ After startup, check older periods in the charts, CSV export, and database statu
 
 ## Local demo and development
 
-**This section requires the full source checkout. The lightweight deployment package does not include frontend application sources or the development environment.** Replay mode works without a UPS, is visibly marked as a demo, and does not query NUT. Local frontend development requires a compatible Node.js version; Node.js 22.12+ is suitable for the current Vite toolchain.
+**This section is for development and demonstration; normal image deployments can skip it.** Replay mode works without a UPS, is visibly marked as a demo, and does not query NUT. Local frontend development requires a compatible Node.js version; Node.js 22.12+ is suitable for the current Vite toolchain. You can keep a separate checkout on a development computer rather than mixing development files with the NAS's runtime data.
 
 ```sh
 git clone https://github.com/BSakura-Miku/ugreen-ups-panel.git
@@ -214,7 +220,7 @@ To restore, stop `panel`, replace `history.sqlite` in the host data directory wi
 
 ## Upgrades, rollback, and removal
 
-Back up the database, Compose configuration, and collector configuration first. Check the version and manifest when downloading a new deployment package; preserve `.env` and the data directory when updating program files. Set `UPS_IMAGE` in `.env` to the desired version tag or digest, then pull and recreate the dashboard:
+Back up the database, Compose configuration, and collector configuration first. For a routine dashboard upgrade, review the version notes, set `UPS_IMAGE` in `.env` to the desired version tag or digest, then pull and recreate the dashboard:
 
 ```sh
 docker compose pull panel
@@ -222,7 +228,11 @@ docker compose up -d panel
 docker compose ps
 ```
 
-Run `sudo sh scripts/install-collector.sh` additionally only if that release also changes the collector or its systemd configuration. Collector releases are stored under `/opt/ugreen-ups-panel/releases/`; `current` points to the active release, and `previous` retains the previous release.
+Synchronize repository files only when the version notes call for changes to Compose, the collector, or its systemd configuration, always preserving `.env` and the data directory. After a collector change, run `sudo sh scripts/install-collector.sh`; a dashboard-image-only update does not require this step.
+
+If the deployment directory is a Git checkout of this project, update it to the required version. **An older archive-based installation without `.git` cannot be updated with `git pull`.** Clone the required repository version into a separate directory, then synchronize only the necessary Compose, collector, and installation files. Do not overwrite the existing `.env` or move the data. A working `./data` bind mount does not need the named-volume migration again.
+
+Collector releases are stored under `/opt/ugreen-ups-panel/releases/`; `current` points to the active release, and `previous` retains the previous release.
 
 **Version 0.3.0 upgrades the database to schema 2. Rolling back to a version that only supports the old schema requires restoring the pre-upgrade database backup. Do not let the old application write directly to the upgraded database.** See the [release notes](docs/DELIVERY.md).
 

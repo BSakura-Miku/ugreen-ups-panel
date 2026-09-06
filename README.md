@@ -10,7 +10,7 @@
 
 为 UGREEN US3000 提供供电状态、电量、电芯、电压与历史趋势。宿主机通过 Linux usbmon 观察原 UPS 驱动已经产生的数据，Docker 容器提供页面和只读 API。页面运行时不依赖智能插座、Home Assistant 或外部 CDN。
 
-从 0.3.1 起，普通部署使用 [Docker Hub 预构建镜像](https://hub.docker.com/r/bsakuramiku/ugreen-ups-panel)和[轻量部署包](https://github.com/BSakura-Miku/ugreen-ups-panel/releases)。NAS 无需安装 Node.js、下载前端源码或现场构建镜像。
+部署使用 [Docker Hub 预构建镜像](https://hub.docker.com/r/bsakuramiku/ugreen-ups-panel)，Compose 配置和宿主机采集器脚本直接取自 [GitHub 仓库](https://github.com/BSakura-Miku/ugreen-ups-panel)。NAS 无需安装 Node.js、编译前端或现场构建镜像。[GitHub Release](https://github.com/BSakura-Miku/ugreen-ups-panel/releases)用于记录版本说明，安装不依赖另行打包的压缩文件。
 
 这是社区项目，与 UGREEN 无隶属或认证关系。**NAS 原有 UPS 服务继续负责断电保护与关机；本项目不承担电源保护。**
 
@@ -30,7 +30,7 @@
 
 ## 兼容性与安装前提
 
-- 连接 UPS 的 Linux 宿主机、systemd、Python 3.10+、Docker Compose v2。镜像支持 `linux/amd64` 与 `linux/arm64`；目前真实 UPS/NAS 验证范围仍为一台 x86_64 NAS、US3000 与 19 V 适配器，ARM 镜像可运行不等同于实机采集已验证。
+- 连接 UPS 的 Linux 宿主机、systemd、Python 3.10+、Git、Docker Compose v2。镜像支持 `linux/amd64` 与 `linux/arm64`；目前真实 UPS/NAS 验证范围仍为一台 x86_64 NAS、US3000 与 19 V 适配器，ARM 镜像可运行不等同于实机采集已验证。
 - 内核提供 usbmon，且可创建 `/dev/usbmonN`。本项目使用二进制接口，无需为页面挂载 debugfs 或 USB 设备。
 - 原有 NUT/系统 UPS 驱动已经连接设备，并持续读取完整的私有 `0x71` 报告。**NUT 能显示电量，不一定意味着它会读取这些报告。** 本项目不会主动发起私有读取。
 - 默认识别 USB VID:PID `2b89:ffff`。同时连接多台匹配设备时，需要通过序列号明确选择。
@@ -40,13 +40,11 @@
 
 **以下命令在连接 UPS 的 Linux NAS 上执行。** Docker Desktop 可以用于构建面板镜像；它不会让 macOS 或另一台开发电脑直接采集 NAS 的 USB 数据。已有 0.3.0 部署请先看下面的[历史迁移](#从-030-迁移历史)，不要直接套用新装步骤创建空数据目录。
 
-在 NAS 持久存储中选择一个空的父目录，下载并解压 **部署包**。它包含 Compose、采集器与安装脚本、双语说明和必要素材，不包含前端源码或开发依赖。
+在 NAS 持久存储中选择一个父目录，确保其中尚不存在 `ugreen-ups-panel` 目录，再克隆仓库。该目录中的 Compose 与安装脚本用于部署；仓库虽然包含源码，普通安装不会构建源码或安装开发依赖。
 
 ```sh
-curl -fL https://github.com/BSakura-Miku/ugreen-ups-panel/releases/download/v0.3.1/ugreen-ups-panel-deploy-0.3.1.tar.gz -o ugreen-ups-panel-deploy-0.3.1.tar.gz
-tar -xzf ugreen-ups-panel-deploy-0.3.1.tar.gz
+git clone https://github.com/BSakura-Miku/ugreen-ups-panel.git
 cd ugreen-ups-panel
-sha256sum -c DEPLOYMENT_MANIFEST.sha256
 cp .env.example .env
 ```
 
@@ -113,7 +111,15 @@ curl --fail http://127.0.0.1:9086/api/health
 
 ## 从 0.3.0 迁移历史
 
-0.3.0 默认将历史放在 Docker 命名卷里，0.3.1 改为 `./data`。直接启动新 Compose 会使用另一处数据库，**不会自动带出旧历史**。先保留旧 Compose、`.env`、镜像和数据库备份，将新版部署包解压到新的部署目录。在新目录从 `.env.example` 创建 `.env`，迁入所需监听地址、端口等设置，不覆盖原部署。
+0.3.0 默认将历史放在 Docker 命名卷里，0.3.1 改为 `./data`。直接启动新 Compose 会使用另一处数据库，**不会自动带出旧历史**。先保留旧 Compose、`.env`、镜像和数据库备份，再将仓库克隆到一个不存在的新目录，不覆盖原部署：
+
+```sh
+git clone https://github.com/BSakura-Miku/ugreen-ups-panel.git ugreen-ups-panel-migration
+cd ugreen-ups-panel-migration
+cp .env.example .env
+```
+
+将所需监听地址、端口等设置迁入新的 `.env`，再继续下面的步骤。
 
 在 NAS 上识别旧面板容器及其 `/data` 来源。以下 `OLD_PANEL_CONTAINER` 必须换成你确认的旧面板容器名；不要选择 NUT 或其他服务。
 
@@ -142,7 +148,7 @@ docker compose up -d
 
 ## 本地演示与开发
 
-**本节需要完整源码仓库，轻量部署包不包含前端源码或开发环境。** 无需 UPS 即可回放测试样本；演示模式有明确标识，不会查询 NUT。本地构建前端需要 Node.js 22.12+。
+**本节用于开发与演示，普通镜像部署无需执行。** 无需 UPS 即可回放测试样本；演示模式有明确标识，不会查询 NUT。本地构建前端需要 Node.js 22.12+。可以在开发电脑上单独克隆仓库，避免将开发文件和 NAS 运行数据混在一起。
 
 ```sh
 git clone https://github.com/BSakura-Miku/ugreen-ups-panel.git
@@ -199,7 +205,7 @@ docker compose cp panel:/data/backup.sqlite ./backup.sqlite
 
 ## 升级、回退与卸载
 
-先备份数据库、Compose 配置和采集器配置。下载新版部署包时核对版本与清单，更新程序文件时保留 `.env` 和数据目录。将 `.env` 中的 `UPS_IMAGE` 改为目标版本标签或 digest，再拉取并重建页面：
+先备份数据库、Compose 配置和采集器配置。日常面板升级只需查看版本说明，将 `.env` 中的 `UPS_IMAGE` 改为目标版本标签或 digest，再拉取并重建页面：
 
 ```sh
 docker compose pull panel
@@ -207,7 +213,11 @@ docker compose up -d panel
 docker compose ps
 ```
 
-只有新版同时变更了采集器或 systemd 配置时，才额外运行 `sudo sh scripts/install-collector.sh`。采集器发布目录位于 `/opt/ugreen-ups-panel/releases/`，`current` 指向当前版本，`previous` 保留上次版本。
+只有版本说明要求更新 Compose、采集器或 systemd 配置时，才同步对应仓库文件，始终保留 `.env` 和数据目录。采集器发生变更后，再运行 `sudo sh scripts/install-collector.sh`；仅更新面板镜像不需要这一步。
+
+当前部署目录确实是本项目 Git 检出时，可以按目标版本更新仓库。**早期由压缩包安装、没有 `.git` 的目录不能直接使用 `git pull`。** 这类安装应将所需版本的仓库另行克隆到新目录，再按需同步 Compose、采集器和安装文件；不要覆盖已有 `.env` 或搬走数据。已有正常的 `./data` 绑定目录也不需要重新执行命名卷迁移。
+
+采集器发布目录位于 `/opt/ugreen-ups-panel/releases/`，`current` 指向当前版本，`previous` 保留上次版本。
 
 **0.3.0 将数据库升级到 schema 2。回退到只支持旧结构的版本时，需要恢复升级前的数据库备份；不要直接让旧版写入升级后的数据库。** 详见[发布说明](docs/DELIVERY.md)。
 

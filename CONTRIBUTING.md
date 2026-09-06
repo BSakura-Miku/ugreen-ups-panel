@@ -34,17 +34,24 @@ docker compose config --quiet
 
 提交的贡献应适用项目的 [MIT 许可证](LICENSE)。第三方代码、依赖或素材的许可不因引用本项目许可而改变。
 
-## 准备发布包
+## 发布流程
 
-维护者使用显式清单导出源码，避免将包含个人研究档案的整个工作目录上传。
+面板镜像发布到 Docker Hub，Compose、配置示例和采集器安装脚本随 GitHub 仓库提供。GitHub Release 记录版本变化、镜像标签、升级步骤与验证结果；后续版本不再额外制作或上传源码压缩包、部署压缩包及其校验清单。已经发布的旧版附件保留，避免破坏历史下载链接。
+
+发布前检查本次提交的公开文件，避免将个人研究档案、本地配置或运行数据提交到仓库：
 
 ```sh
-python3 scripts/prepare-release.py --check
-python3 scripts/prepare-release.py --output /tmp/us3000-release-review
+python3 scripts/check-public.py --require-git
 ```
 
-输出目录必须不存在。命令生成公开源码目录、相邻的 `.tar.gz` 和压缩包校验文件；目录内的 `SOURCE_MANIFEST.sha256` 记录每个公开文件的摘要。默认输出路径位于项目的 `dist/release/`，不会覆盖已有包。
+新增公开文件时同步更新检查清单。检查脚本只读文件，CI 直接在仓库中运行测试、验证 Compose、构建镜像并检查容器启动及接口，不再生成发布包。清单与基础敏感信息扫描不能替代人工核查、素材授权检查或 Git 历史检查。
 
-新增运行必需文件时，应同步更新导出清单；CI 会在导出目录内运行测试并构建 Docker 镜像。清单与基础敏感信息扫描不能替代人工核查、素材授权检查或 Git 历史检查。
+一次版本发布按以下顺序完成：
+
+1. 更新版本号、Compose 和 `.env.example` 的镜像标签、更新记录及双语说明，提交并通过 CI。
+2. 从该提交构建 `linux/amd64` 与 `linux/arm64` 镜像，分别运行 `scripts/smoke-image.py` 验证，再发布对应 Docker Hub 版本标签并同步 `latest`。版本标签对应固定发布内容。
+3. 在同一提交创建 Git 标签和 GitHub Release，说明变更、镜像 digest、升级步骤和验证范围。只有采集器或系统服务配置变化时，才要求用户重新安装宿主机采集器。
+
+首次安装按 README 克隆仓库、配置并安装宿主机采集器，再执行 `docker compose pull` 与 `docker compose up -d`。日常面板更新调整 `UPS_IMAGE` 后拉取镜像即可；数据库和本地配置继续保留在部署目录。
 
 更新前端依赖后，先 `npm --prefix frontend ci`，再运行 `python3 scripts/update-third-party-notices.py`，检查并提交第三方许可汇总。脚本保留包内的许可证与 NOTICE 原文；缺失许可文件会要求人工核查。

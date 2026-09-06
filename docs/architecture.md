@@ -4,18 +4,20 @@
 
 ## 部署位置
 
-从 0.3.1 起，默认 Compose 拉取预构建面板镜像，宿主机采集器仍独立运行。源码目录、NAS 部署目录和系统服务目录各有用途：
+默认 Compose 拉取 Docker Hub 上的预构建面板镜像，Compose 配置与采集器安装文件直接来自 GitHub 仓库。GitHub Release 用于版本说明，安装不依赖另行制作的部署压缩包。宿主机采集器仍独立运行，源码目录、NAS 部署目录和系统服务目录各有用途：
 
 | 位置 | 内容 | 运行时用途 |
 | --- | --- | --- |
-| 完整源码目录，可位于开发电脑 | 前端、后端、测试、构建文件 | 开发与构建镜像；NAS 默认部署不需要前端源码或 Node.js |
-| NAS 部署目录 | `compose.yaml`、`.env`、安装脚本、`data/` | Compose 配置与持久历史，目录应放在 NAS 持久存储中 |
+| 开发电脑上的独立仓库检出 | 前端、后端、测试、构建文件 | 开发与构建镜像；NAS 默认部署不需要编译源码或安装 Node.js |
+| NAS 上克隆仓库形成的部署目录 | `compose.yaml`、`.env`、安装脚本、`data/` 及仓库文件 | 使用仓库配置与脚本部署，持久历史写入 `data/`，目录应放在 NAS 持久存储中 |
 | `/opt/ugreen-ups-panel/current` | 已安装的采集器版本 | systemd 运行宿主机采集器 |
 | `/etc/ugreen-ups-panel.env` | 序列号、NUT 目标、校准配置 | 宿主机采集器配置，独立于 Compose `.env` |
 | `/run/ugreen-ups-panel/latest.json` | 最新采集快照 | 容器只读读取；不是历史数据库 |
 | 部署目录下的 `data/history.sqlite` | SQLite 历史数据库 | 默认以 `./data` 绑定到容器 `/data` |
 
 Docker Desktop 可在开发电脑上构建面板镜像，但这不等于该电脑可以采集 NAS 的 USB 数据。真实采集器需要运行在连接 UPS、具备 Linux usbmon 和原 UPS 驱动的宿主机。容器通过快照文件读取数据，不通过网络自动寻找另一台 NAS。
+
+面板的日常升级只需调整 `UPS_IMAGE` 后拉取并重建容器。只有 Compose 或采集器变更时，才需要同步相应仓库文件；采集器变更后再重新安装其服务。早期从压缩包安装的目录可能没有 `.git`，应另行克隆所需版本并按需同步，保留已有 `.env` 和数据目录，不能直接假定可以执行 `git pull`。
 
 ```mermaid
 flowchart LR
