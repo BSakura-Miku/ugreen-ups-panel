@@ -9,15 +9,15 @@
 | 位置 | 内容 | 运行时用途 |
 | --- | --- | --- |
 | 开发电脑上的独立仓库检出 | 前端、后端、测试、构建文件 | 开发与构建镜像；NAS 默认部署不需要编译源码或安装 Node.js |
-| NAS 上克隆仓库形成的部署目录 | `compose.yaml`、`.env`、安装脚本、`data/` 及仓库文件 | 使用仓库配置与脚本部署，持久历史写入 `data/`，目录应放在 NAS 持久存储中 |
+| NAS 上克隆仓库形成的部署目录 | `compose.yaml`、安装脚本、`data/` 及仓库文件 | Compose 直接提供默认设置，持久历史写入 `data/`，目录应放在 NAS 持久存储中 |
 | `/opt/ugreen-ups-panel/current` | 已安装的采集器版本 | systemd 运行宿主机采集器 |
-| `/etc/ugreen-ups-panel.env` | 序列号、NUT 目标、校准配置 | 宿主机采集器配置，独立于 Compose `.env` |
+| `/etc/ugreen-ups-panel.env` | 安装器管理的采集器设置 | 自动生成并保留已有设置，普通安装无需编辑 |
 | `/run/ugreen-ups-panel/latest.json` | 最新采集快照 | 容器只读读取；不是历史数据库 |
 | 部署目录下的 `data/history.sqlite` | SQLite 历史数据库 | 默认以 `./data` 绑定到容器 `/data` |
 
 Docker Desktop 可在开发电脑上构建面板镜像，但这不等于该电脑可以采集 NAS 的 USB 数据。真实采集器需要运行在连接 UPS、具备 Linux usbmon 和原 UPS 驱动的宿主机。容器通过快照文件读取数据，不通过网络自动寻找另一台 NAS。
 
-面板的日常升级只需调整 `UPS_IMAGE` 后拉取并重建容器。只有 Compose 或采集器变更时，才需要同步相应仓库文件；采集器变更后再重新安装其服务。早期从压缩包安装的目录可能没有 `.git`，应另行克隆所需版本并按需同步，保留已有 `.env` 和数据目录，不能直接假定可以执行 `git pull`。
+Compose 默认使用 `bsakuramiku/ugreen-ups-panel:latest`，通过 NAS 的 `9086` 端口提供页面，不需要项目 `.env` 文件。日常升级执行 `docker compose pull && docker compose up -d`。端口、时区或指定版本可直接修改 Compose；只有采集器变更时，才需要更新其源文件并重新运行安装脚本。
 
 ```mermaid
 flowchart LR
@@ -50,9 +50,9 @@ flowchart LR
 
 ## Web 与历史
 
-FastAPI 同时提供本地静态资源与只读 API。容器没有 USB 设备挂载，也不需要 root；只读挂载快照目录，独占可写的 `/data`。0.3.1 默认将 `/data` 映射到部署目录中的 `./data`，可通过 Compose 环境变量指定其他持久目录。
+FastAPI 同时提供本地静态资源与只读 API。容器没有 USB 设备挂载，也不需要 root；只读挂载快照目录，独占可写的 `/data`。Compose 将 `/data` 映射到部署目录中的 `./data`。
 
-默认 Compose 项目名固定为 `ugreen-ups-panel`，避免部署目录改名后意外创建另一套服务。数据目录需要预先存在并允许 UID/GID `10001:10001` 写入；Compose 不会静默创建一个归属不正确的空目录。旧版命名卷中的历史不会自动迁移到新绑定目录，升级时应按 README 完成显式迁移并保留原卷。
+默认 Compose 项目名固定为 `ugreen-ups-panel`。采集器安装脚本自动创建项目 `data/`，设置 UID/GID `10001:10001` 和目录权限 `0750`，保留已有数据库；用户无需手动处理目录权限。Compose 要求挂载目录已经存在，防止遗漏安装步骤时创建不正确的空目录。
 
 | 接口 | 用途 |
 | --- | --- |
@@ -72,6 +72,19 @@ FastAPI 同时提供本地静态资源与只读 API。容器没有 USB 设备挂
 
 ## 信任与网络边界
 
-本项目的页面无账号体系，能够访问 HTTP 服务的人可读取设备遥测、历史和诊断。默认绑定回环地址，接入局域网时由部署者管理网络访问。详细权限与隐私说明见[安全说明](../SECURITY.md)。
+本项目的页面无账号体系，能够访问 HTTP 服务的人可读取设备遥测、历史和诊断。默认使用 NAS 的 `9086` 端口，适用于可信局域网。详细权限与隐私说明见[安全说明](../SECURITY.md)。
 
 硬件档案是静态资料，不能替代本机硬件识别。芯片具备的检测/控制功能也不会自动变成公开 API 字段。
+
+## 备份与维护
+
+历史保存在项目 `data/history.sqlite`，更新或重建容器不会删除它。在线备份使用 SQLite 备份接口，避免遗漏尚在 WAL 文件中的已提交记录：
+
+```sh
+docker compose exec -T panel python -c "import sqlite3; s=sqlite3.connect('/data/history.sqlite'); d=sqlite3.connect('/data/backup.sqlite'); s.backup(d); d.close(); s.close()"
+docker compose cp panel:/data/backup.sqlite ./backup.sqlite
+```
+
+恢复备份时先停止 `panel`，保留当前数据库副本，再替换 `data/history.sqlite`，移走对应旧 WAL/SHM 文件并确认数据库属于 `10001:10001` 后启动。不同版本间恢复前需核对数据库兼容性，不能在面板仍写入时替换数据库。
+
+卸载使用 `docker compose down` 和 `sudo sh scripts/uninstall-collector.sh`。这两步保留历史数据，采集器卸载脚本不管理原 UPS/NUT 服务。

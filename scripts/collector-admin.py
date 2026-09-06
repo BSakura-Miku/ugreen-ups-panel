@@ -105,6 +105,24 @@ def write_environment(profile):
     path.chmod(0o600)
 
 
+def prepare_data_directory(source):
+    """Prepare only the bind-mount directory; preserve every existing data file."""
+    data = source / 'data'
+    if data.is_symlink() or (data.exists() and not data.is_dir()):
+        raise ValueError('Project data must be a directory, not a symlink or file.')
+    data.mkdir(mode=0o750, exist_ok=True)
+    # Operate on the opened directory, never follow a substituted symlink.
+    fd = os.open(data, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        current = os.fstat(fd)
+        if (current.st_uid, current.st_gid) != (10001, 10001):
+            os.fchown(fd, 10001, 10001)
+        if current.st_mode & 0o7777 != 0o750:
+            os.fchmod(fd, 0o750)
+    finally:
+        os.close(fd)
+
+
 def install(source, profile=None):
     for filename in ('__init__.py', 'collector.py', 'protocol.py', 'power.py', 'usbmon.py'):
         if not (source / 'ups_panel' / filename).is_file():
@@ -114,6 +132,7 @@ def install(source, profile=None):
             raise ValueError(f'Deployment source is incomplete: {filename}')
     command('/usr/bin/python3', '-c', 'import ctypes, select, sqlite3; import sys; assert sys.version_info >= (3, 10), "Python 3.10+ required"')
     command('/sbin/modinfo', 'usbmon')
+    prepare_data_directory(source)
     (BASE / 'releases').mkdir(parents=True, exist_ok=True)
     release = Path(tempfile.mkdtemp(prefix=time.strftime('%Y%m%d-%H%M%S-'), dir=BASE / 'releases'))
     release.chmod(0o755)

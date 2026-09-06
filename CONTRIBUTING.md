@@ -4,13 +4,35 @@
 
 ## 本地验证
 
-按 README 创建 Python 虚拟环境并安装前端依赖，用回放模式开发。回放能验证页面和协议行为，不需要连接真实 UPS。
+以下步骤用于开发，不属于普通 Docker 安装流程。在仓库目录中创建 Python 环境并构建前端；本地前端构建需要 Node.js 22.12+。
+
+```sh
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.lock -r requirements-dev.txt
+npm --prefix frontend ci
+npm --prefix frontend run build
+```
+
+无需 UPS 即可回放测试样本。演示模式有明确标识，不查询 NUT。在两个终端分别运行：
+
+```sh
+# 终端一
+.venv/bin/python -m ups_panel.collector --replay fixtures/online.hex --output runtime/latest.json
+
+# 终端二
+UPS_SNAPSHOT=runtime/latest.json UPS_DATABASE=runtime/history.sqlite \
+  .venv/bin/uvicorn ups_panel.app:app --host 127.0.0.1 --port 8765
+```
+
+打开 `http://127.0.0.1:8765`。需要前端热更新时另行执行 `npm --prefix frontend run dev`，开发代理会将 API 请求转发到 `8765`。
 
 ```sh
 .venv/bin/python -m pytest -q
 npm --prefix frontend run build
 docker compose config --quiet
 ```
+
+源码 Docker 构建可使用 `docker build -t ugreen-ups-panel:dev .`，再执行 `python3 scripts/smoke-image.py --image ugreen-ups-panel:dev` 检查镜像。`compose.build.yaml` 仅供已经准备好快照和数据目录的开发环境覆盖使用。
 
 一个数据库只运行一个后端 worker。不要为测试停止 NAS 的 UPS 保护服务、解绑 USB、写入 UPS 指令或自动切换供电。需要硬件操作的兼容性问题，请把操作方案与纯软件复现分开说明。
 
@@ -36,7 +58,7 @@ docker compose config --quiet
 
 ## 发布流程
 
-面板镜像发布到 Docker Hub，Compose、配置示例和采集器安装脚本随 GitHub 仓库提供。GitHub Release 记录版本变化、镜像标签、升级步骤与验证结果；后续版本不再额外制作或上传源码压缩包、部署压缩包及其校验清单。已经发布的旧版附件保留，避免破坏历史下载链接。
+面板镜像发布到 Docker Hub，Compose 和采集器安装脚本随 GitHub 仓库提供。GitHub Release 记录版本变化、镜像标签、升级步骤与验证结果；后续版本不再额外制作或上传源码压缩包、部署压缩包及其校验清单。已经发布的旧版附件保留，避免破坏历史下载链接。
 
 发布前检查本次提交的公开文件，避免将个人研究档案、本地配置或运行数据提交到仓库：
 
@@ -48,10 +70,10 @@ python3 scripts/check-public.py --require-git
 
 一次版本发布按以下顺序完成：
 
-1. 更新版本号、Compose 和 `.env.example` 的镜像标签、更新记录及双语说明，提交并通过 CI。
+1. 更新版本号、更新记录及双语说明，提交并通过 CI。默认 Compose 继续使用 `latest`，用户无需为每次更新手改版本配置。
 2. 从该提交构建 `linux/amd64` 与 `linux/arm64` 镜像，分别运行 `scripts/smoke-image.py` 验证，再发布对应 Docker Hub 版本标签并同步 `latest`。版本标签对应固定发布内容。
 3. 在同一提交创建 Git 标签和 GitHub Release，说明变更、镜像 digest、升级步骤和验证范围。只有采集器或系统服务配置变化时，才要求用户重新安装宿主机采集器。
 
-首次安装按 README 克隆仓库、配置并安装宿主机采集器，再执行 `docker compose pull` 与 `docker compose up -d`。日常面板更新调整 `UPS_IMAGE` 后拉取镜像即可；数据库和本地配置继续保留在部署目录。
+首次安装按 README 克隆仓库、安装宿主机采集器，再执行 `docker compose up -d`。安装脚本准备数据目录，Compose 自动拉取镜像。日常面板更新执行 `docker compose pull && docker compose up -d`；数据库继续保留在 `./data`。
 
 更新前端依赖后，先 `npm --prefix frontend ci`，再运行 `python3 scripts/update-third-party-notices.py`，检查并提交第三方许可汇总。脚本保留包内的许可证与 NOTICE 原文；缺失许可文件会要求人工核查。

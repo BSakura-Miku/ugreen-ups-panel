@@ -14,7 +14,6 @@ dist/
 *.sqlite*
 *.jsonl
 .env.*
-!.env.example
 # Private research, reference photographs and local calibration records.
 docs/power-investigation/
 docs/research/

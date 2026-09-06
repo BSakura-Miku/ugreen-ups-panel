@@ -7,7 +7,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 FILES = (
-    '.gitignore', '.dockerignore', '.env.example', '.github/workflows/ci.yml',
+    '.gitignore', '.dockerignore', '.github/workflows/ci.yml',
     'LICENSE', 'THIRD_PARTY_NOTICES.txt', 'README.md', 'README.en.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'SECURITY.md',
     'Dockerfile', 'compose.yaml', 'compose.build.yaml', 'requirements.txt', 'requirements.lock', 'requirements-dev.txt',
     'deploy/ugreen-ups-collector.service', 'deploy/ugreen-ups-panel.tmpfiles.conf',
@@ -15,7 +15,7 @@ FILES = (
     'docs/validation.md', 'docs/DELIVERY.md', 'docs/assets/dashboard-demo.png',
     'scripts/install-collector.sh', 'scripts/rollback-collector.sh', 'scripts/uninstall-collector.sh',
     'scripts/collector-admin.py', 'scripts/capture-power.py', 'scripts/check-public.py',
-    'scripts/update-third-party-notices.py', 'scripts/migrate-history.py', 'scripts/smoke-image.py',
+    'scripts/update-third-party-notices.py', 'scripts/smoke-image.py',
     'frontend/package.json', 'frontend/package-lock.json', 'frontend/tsconfig.json',
     'frontend/vite.config.ts', 'frontend/index.html',
     'frontend/src/assets/us3000-logo.png', 'frontend/src/assets/favicon.png',

@@ -12,8 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_collector_and_admin_commands_need_only_standard_library():
-    commands = [('-m', 'ups_panel.collector'), ('scripts/collector-admin.py',),
-                ('scripts/migrate-history.py',)]
+    commands = [('-m', 'ups_panel.collector'), ('scripts/collector-admin.py',)]
     for args in commands:
         result = subprocess.run([sys.executable, '-S', *args, '--help'], cwd=ROOT,
                                 capture_output=True, text=True)
@@ -45,11 +44,11 @@ def test_production_compose_uses_prebuilt_image_and_protected_bind_mounts(tmp_pa
     shutil.copyfile(ROOT / 'compose.yaml', tmp_path / 'compose.yaml')
     configuration = compose_config(tmp_path, ['compose.yaml'])
     panel = configuration['services']['panel']
-    version = json.loads((ROOT / 'frontend/package.json').read_text())['version']
-    assert panel['image'] == f'bsakuramiku/ugreen-ups-panel:{version}'
+    assert panel['image'] == 'bsakuramiku/ugreen-ups-panel:latest'
     assert 'build' not in panel
     assert configuration['name'] == 'ugreen-ups-panel'
-    assert panel['ports'][0]['host_ip'] == '127.0.0.1'
+    assert panel['ports'][0].get('host_ip', '0.0.0.0') == '0.0.0.0'
+    assert str(panel['ports'][0]['published']) == '9086'
     mounts = {entry['target']: entry for entry in panel['volumes']}
     assert mounts['/capture']['read_only'] is True
     assert mounts['/capture']['source'] == '/run/ugreen-ups-panel'
@@ -60,6 +59,18 @@ def test_production_compose_uses_prebuilt_image_and_protected_bind_mounts(tmp_pa
     assert panel['read_only'] is True and panel['cap_drop'] == ['ALL']
     assert not panel.get('privileged') and not panel.get('devices')
     assert not (tmp_path / 'data').exists()
+
+
+def test_old_env_variables_do_not_change_the_simple_compose_defaults(tmp_path):
+    shutil.copyfile(ROOT / 'compose.yaml', tmp_path / 'compose.yaml')
+    (tmp_path / '.env').write_text('UPS_IMAGE=unused:old\nUPS_BIND_IP=127.0.0.1\n'
+                                  'UPS_PORT=1234\nUPS_DATA_DIR=./old-data\nTZ=UTC\n')
+    panel = compose_config(tmp_path, ['compose.yaml'])['services']['panel']
+    assert panel['image'] == 'bsakuramiku/ugreen-ups-panel:latest'
+    assert str(panel['ports'][0]['published']) == '9086'
+    assert panel['environment']['TZ'] == 'Asia/Shanghai'
+    data = next(mount for mount in panel['volumes'] if mount['target'] == '/data')
+    assert data['source'] == str(tmp_path / 'data')
 
 
 def test_source_build_override_is_separate_from_production_compose(tmp_path):

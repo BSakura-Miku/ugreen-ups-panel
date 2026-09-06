@@ -34,7 +34,7 @@ def initialize_git(root):
 def test_repository_allowlist_contains_runtime_inputs_and_excludes_private_paths():
     files = {path.relative_to(ROOT).as_posix() for path in public.public_files()}
     assert {'deploy/ugreen-ups-collector.service', 'deploy/ugreen-ups-panel.tmpfiles.conf',
-            'scripts/collector-admin.py', 'scripts/install-collector.sh', 'scripts/migrate-history.py',
+            'scripts/collector-admin.py', 'scripts/install-collector.sh',
             'scripts/check-public.py', 'frontend/src/HistoryChart.tsx', 'frontend/src/assets/favicon.png',
             'docs/assets/dashboard-demo.png', 'THIRD_PARTY_NOTICES.txt'} <= files
     assert not any(name.startswith(('docs/research/', 'docs/power-investigation/', 'design/')) for name in files)

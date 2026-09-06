@@ -33,4 +33,3 @@ jobs:
         run: |
           python -S -m ups_panel.collector --help
           python -S scripts/collector-admin.py --help
-          python -S scripts/migrate-history.py --help

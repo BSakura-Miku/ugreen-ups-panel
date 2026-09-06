@@ -22,6 +22,7 @@ def admin(tmp_path, monkeypatch):
     monkeypatch.setattr(module, 'CONFIGS', configs)
     monkeypatch.setattr(module, 'SNAPSHOT', tmp_path / 'latest.json')
     calls = []
+    ownership_calls = []
     systemd = {'active': True, 'enabled': True}
 
     def command(*args, check=True):
@@ -41,6 +42,10 @@ def admin(tmp_path, monkeypatch):
         return result
 
     monkeypatch.setattr(module, 'command', command)
+    def set_directory_owner(fd, uid, gid):
+        assert module.os.fstat(fd).st_ino == (module.test_source / 'data').stat().st_ino
+        ownership_calls.append((uid, gid))
+    monkeypatch.setattr(module.os, 'fchown', set_directory_owner)
     module.test_validate_fresh = module.validate_fresh
     monkeypatch.setattr(module, 'validate_fresh', lambda started: None)
     source = tmp_path / 'source'
@@ -64,6 +69,7 @@ def admin(tmp_path, monkeypatch):
     module.test_source = source
     module.test_systemd = systemd
     module.test_calls = calls
+    module.test_ownership_calls = ownership_calls
     return module
 
 
@@ -175,3 +181,64 @@ def test_installer_health_check_rejects_replay_or_pre_restart_data(admin, monkey
     monkeypatch.setattr(admin, 'time', SimpleNamespace(monotonic=lambda: next(ticks), time=lambda: 100, sleep=lambda _: None))
     with pytest.raises(RuntimeError, match='No fresh UPS telemetry'):
         admin.test_validate_fresh(99, timeout=1)
+
+
+def test_install_prepares_container_data_directory_without_manual_setup(admin):
+    data = admin.test_source / 'data'
+    assert not data.exists()
+    admin.install(admin.test_source)
+    assert data.is_dir() and data.stat().st_mode & 0o7777 == 0o750
+    assert admin.test_ownership_calls == [(10001, 10001)]
+    assert not list(data.iterdir())
+
+
+def test_repeated_install_preserves_existing_history_files_and_subdirectory_permissions(admin):
+    data = admin.test_source / 'data'
+    data.mkdir(mode=0o700)
+    database = data / 'history.sqlite'
+    database.write_bytes(b'existing history must remain unchanged')
+    database.chmod(0o600)
+    nested = data / 'other'
+    nested.mkdir(mode=0o700)
+    (nested / 'keep.txt').write_text('keep')
+    before = (database.read_bytes(), database.stat().st_mode, database.stat().st_uid,
+              database.stat().st_gid, database.stat().st_mtime_ns, nested.stat().st_mode)
+    admin.install(admin.test_source)
+    admin.install(admin.test_source)
+    assert (database.read_bytes(), database.stat().st_mode, database.stat().st_uid,
+            database.stat().st_gid, database.stat().st_mtime_ns, nested.stat().st_mode) == before
+    assert (nested / 'keep.txt').read_text() == 'keep'
+    assert all(pair == (10001, 10001) for pair in admin.test_ownership_calls)
+    assert data.stat().st_mode & 0o7777 == 0o750
+
+
+@pytest.mark.parametrize('kind', ['file', 'symlink', 'dangling_symlink'])
+def test_invalid_data_path_is_rejected_before_existing_service_changes(admin, kind):
+    data = admin.test_source / 'data'
+    target = admin.test_source / 'untouched'
+    if kind == 'file':
+        data.write_text('retain file')
+    elif kind == 'symlink':
+        target.mkdir(mode=0o700)
+        data.symlink_to(target, target_is_directory=True)
+    else:
+        data.symlink_to(target)
+    before = state(admin)
+    with pytest.raises(ValueError, match='Project data must be a directory'):
+        admin.install(admin.test_source)
+    assert state(admin) == before
+    assert not admin.test_ownership_calls
+    assert not any(call[0] == 'systemctl' for call in admin.test_calls)
+    if kind == 'file': assert data.read_text() == 'retain file'
+    if kind == 'symlink': assert target.stat().st_mode & 0o7777 == 0o700
+
+
+def test_data_ownership_failure_leaves_existing_collector_untouched(admin, monkeypatch):
+    def denied(*args):
+        raise PermissionError('Cannot prepare container data directory')
+    monkeypatch.setattr(admin.os, 'fchown', denied)
+    before = state(admin)
+    with pytest.raises(PermissionError):
+        admin.install(admin.test_source)
+    assert state(admin) == before
+    assert not any(call[0] == 'systemctl' for call in admin.test_calls)
