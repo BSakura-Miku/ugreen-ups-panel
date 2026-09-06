@@ -2,6 +2,21 @@
 
 页面、历史记录和设备保护分工独立。原 UPS 驱动继续拥有 USB 接口，本项目只观察它已经产生的通信。
 
+## 部署位置
+
+从 0.3.1 起，默认 Compose 拉取预构建面板镜像，宿主机采集器仍独立运行。源码目录、NAS 部署目录和系统服务目录各有用途：
+
+| 位置 | 内容 | 运行时用途 |
+| --- | --- | --- |
+| 完整源码目录，可位于开发电脑 | 前端、后端、测试、构建文件 | 开发与构建镜像；NAS 默认部署不需要前端源码或 Node.js |
+| NAS 部署目录 | `compose.yaml`、`.env`、安装脚本、`data/` | Compose 配置与持久历史，目录应放在 NAS 持久存储中 |
+| `/opt/ugreen-ups-panel/current` | 已安装的采集器版本 | systemd 运行宿主机采集器 |
+| `/etc/ugreen-ups-panel.env` | 序列号、NUT 目标、校准配置 | 宿主机采集器配置，独立于 Compose `.env` |
+| `/run/ugreen-ups-panel/latest.json` | 最新采集快照 | 容器只读读取；不是历史数据库 |
+| 部署目录下的 `data/history.sqlite` | SQLite 历史数据库 | 默认以 `./data` 绑定到容器 `/data` |
+
+Docker Desktop 可在开发电脑上构建面板镜像，但这不等于该电脑可以采集 NAS 的 USB 数据。真实采集器需要运行在连接 UPS、具备 Linux usbmon 和原 UPS 驱动的宿主机。容器通过快照文件读取数据，不通过网络自动寻找另一台 NAS。
+
 ```mermaid
 flowchart LR
   UPS[US3000] <-->|USB 通信| NUT[原 UPS 驱动 / NUT]
@@ -33,7 +48,9 @@ flowchart LR
 
 ## Web 与历史
 
-FastAPI 同时提供本地静态资源与只读 API。容器没有 USB 设备挂载，也不需要 root；只读挂载快照目录，独占可写历史卷。
+FastAPI 同时提供本地静态资源与只读 API。容器没有 USB 设备挂载，也不需要 root；只读挂载快照目录，独占可写的 `/data`。0.3.1 默认将 `/data` 映射到部署目录中的 `./data`，可通过 Compose 环境变量指定其他持久目录。
+
+默认 Compose 项目名固定为 `ugreen-ups-panel`，避免部署目录改名后意外创建另一套服务。数据目录需要预先存在并允许 UID/GID `10001:10001` 写入；Compose 不会静默创建一个归属不正确的空目录。旧版命名卷中的历史不会自动迁移到新绑定目录，升级时应按 README 完成显式迁移并保留原卷。
 
 | 接口 | 用途 |
 | --- | --- |

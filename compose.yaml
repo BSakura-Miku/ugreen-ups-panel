@@ -1,7 +1,8 @@
+name: ugreen-ups-panel
+
 services:
   panel:
-    build: .
-    image: ugreen-ups-panel:0.3.0
+    image: ${UPS_IMAGE:-bsakuramiku/ugreen-ups-panel:0.3.1}
     restart: unless-stopped
     ports:
       - "${UPS_BIND_IP:-127.0.0.1}:${UPS_PORT:-9086}:8080"
@@ -11,12 +12,16 @@ services:
       TZ: ${TZ:-UTC}
     volumes:
       - type: bind
-        source: /run/ugreen-ups-panel
+        source: ${UPS_CAPTURE_DIR:-/run/ugreen-ups-panel}
         target: /capture
         read_only: true
         bind:
           create_host_path: false
-      - panel-data:/data
+      - type: bind
+        source: ${UPS_DATA_DIR:-./data}
+        target: /data
+        bind:
+          create_host_path: false
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777
@@ -30,5 +35,3 @@ services:
       options:
         max-size: "5m"
         max-file: "2"
-volumes:
-  panel-data:

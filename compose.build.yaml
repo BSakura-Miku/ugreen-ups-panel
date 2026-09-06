@@ -1,0 +1,7 @@
+# Optional source build; production uses the prebuilt image in compose.yaml.
+services:
+  panel:
+    image: ugreen-ups-panel:local
+    pull_policy: never
+    build:
+      context: .

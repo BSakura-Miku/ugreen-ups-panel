@@ -23,6 +23,7 @@ jobs:
       - run: npm ci && npm run build && npm audit
         working-directory: frontend
       - run: python scripts/prepare-release.py --check
+      - run: python scripts/prepare-deployment.py --check
       - name: Validate the distributable source
         run: |
           python scripts/prepare-release.py --output "$RUNNER_TEMP/ugreen-ups-panel-release"
@@ -32,3 +33,12 @@ jobs:
           for script in scripts/*.sh; do sh -n "$script"; done
           docker compose config --quiet
           docker build -t ugreen-ups-panel:ci .
+          python scripts/smoke-image.py --image ugreen-ups-panel:ci --platform linux/amd64
+      - name: Validate the deployment bundle
+        run: |
+          python scripts/prepare-deployment.py --output "$RUNNER_TEMP/ugreen-ups-panel-deploy"
+          cd "$RUNNER_TEMP/ugreen-ups-panel-deploy"
+          sha256sum --check DEPLOYMENT_MANIFEST.sha256
+          docker compose config --quiet
+          python scripts/collector-admin.py --help
+          python scripts/migrate-history.py --help

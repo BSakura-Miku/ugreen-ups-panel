@@ -12,14 +12,15 @@ ROOT = Path(__file__).resolve().parents[1]
 FILES = (
     '.gitignore', '.dockerignore', '.env.example', '.github/workflows/ci.yml',
     'LICENSE', 'THIRD_PARTY_NOTICES.txt', 'README.md', 'README.en.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'SECURITY.md',
-    'Dockerfile', 'compose.yaml', 'requirements.txt', 'requirements.lock', 'requirements-dev.txt',
+    'Dockerfile', 'compose.yaml', 'compose.build.yaml', 'requirements.txt', 'requirements.lock', 'requirements-dev.txt',
     'deploy/ugreen-ups-collector.service', 'deploy/ugreen-ups-panel.tmpfiles.conf',
     'docs/fields.md', 'docs/calibration.md', 'docs/architecture.md', 'docs/hardware.md',
     'docs/validation.md', 'docs/DELIVERY.md',
     'docs/assets/dashboard-demo.png',
     'scripts/install-collector.sh', 'scripts/rollback-collector.sh', 'scripts/uninstall-collector.sh',
     'scripts/collector-admin.py', 'scripts/capture-power.py', 'scripts/prepare-release.py',
-    'scripts/update-third-party-notices.py',
+    'scripts/update-third-party-notices.py', 'scripts/prepare-deployment.py',
+    'scripts/migrate-history.py', 'scripts/smoke-image.py',
     'frontend/package.json', 'frontend/package-lock.json', 'frontend/tsconfig.json',
     'frontend/vite.config.ts', 'frontend/index.html',
 )
@@ -80,7 +81,7 @@ def main():
         info.uname = info.gname = ''
         info.mtime = 0
         return info
-    with tarfile.open(archive, 'w:gz') as stream:
+    with tarfile.open(archive, 'x:gz') as stream:
         stream.add(target, arcname=target.name, filter=clean_info)
     checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
     checksum_file.write_text(f'{checksum}  {archive.name}\n')

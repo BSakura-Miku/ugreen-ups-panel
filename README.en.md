@@ -12,6 +12,8 @@ An unofficial, read-only UGREEN US3000 dashboard for Linux NAS systems. It displ
 
 The running dashboard does not depend on a smart plug, Home Assistant, or an external CDN.
 
+Starting with 0.3.1, normal installations use a [prebuilt Docker Hub image](https://hub.docker.com/r/bsakuramiku/ugreen-ups-panel) and a [lightweight deployment package](https://github.com/BSakura-Miku/ugreen-ups-panel/releases). You do not need Node.js, frontend application sources, or an on-NAS image build to deploy it.
+
 This is a community project, with no affiliation with or certification from UGREEN. **The NAS's existing UPS service remains responsible for power-loss protection and shutdown. This project does not provide power protection.**
 
 ## What you can monitor
@@ -30,33 +32,69 @@ There are no remote-shutdown, smart-plug control, UPS parameter-write, or automa
 
 ## Compatibility and prerequisites
 
-- Linux x86_64, systemd, Python 3.10+, and Docker Compose v2. Hardware validation currently covers one US3000 with a 19 V adapter; other architectures and firmware versions need validation.
+- A Linux host connected to the UPS, systemd, Python 3.10+, and Docker Compose v2. Images support `linux/amd64` and `linux/arm64`; actual UPS/NAS hardware validation still covers one x86_64 NAS, US3000, and 19 V adapter. An ARM image starting successfully does not establish real UPS capture compatibility.
 - A kernel with usbmon support and working `/dev/usbmonN` devices. The collector uses the binary interface; the dashboard does not need debugfs or USB devices mounted into its container.
 - An existing NUT/system UPS driver connected to the UPS and continuously reading complete private `0x71` reports. **NUT being able to display charge percentage does not prove that it reads these reports.** This project does not actively request them.
 - Device discovery matches USB VID:PID `2b89:ffff`. If several matching devices are attached, select one explicitly by serial number.
 - The dashboard and API have no built-in login and bind to `127.0.0.1` by default. Limit LAN access to trusted networks; use an authenticated reverse proxy or a VPN for remote access.
 
-## Deployment
+## First installation
 
-Clone the repository, then run the commands from its root directory. Installing the host collector requires root. The scripts install and restart only this project's services.
+**Run these commands on the Linux NAS connected to the UPS.** Docker Desktop can build the dashboard image; it does not give macOS or another development computer access to USB telemetry on the NAS. Existing 0.3.0 users should first follow [history migration](#migrating-history-from-030), rather than creating an empty data directory with the new-install instructions.
+
+Choose an empty parent directory on persistent NAS storage, then download and extract the **deployment package**. It contains Compose configuration, the collector and installer, both READMEs, and necessary documentation assets. It does not contain frontend application sources or development dependencies.
 
 ```sh
-git clone https://github.com/BSakura-Miku/ugreen-ups-panel.git
+curl -fL https://github.com/BSakura-Miku/ugreen-ups-panel/releases/download/v0.3.1/ugreen-ups-panel-deploy-0.3.1.tar.gz -o ugreen-ups-panel-deploy-0.3.1.tar.gz
+tar -xzf ugreen-ups-panel-deploy-0.3.1.tar.gz
 cd ugreen-ups-panel
+sha256sum -c DEPLOYMENT_MANIFEST.sha256
+cp .env.example .env
+```
 
-# 1. Install the host collector.
-# Installation fails if no new report arrives during validation.
-# An upgrade attempts to restore the previous collector if validation fails.
+Edit `.env` before starting if needed. By default the service listens only on the NAS itself at `127.0.0.1:9086`. For access from another LAN device, set `UPS_BIND_IP` to the NAS's actual LAN address. Keeping the defaults does not automatically change firewall rules or broaden the listener.
+
+| Compose setting | Default | Purpose |
+| --- | --- | --- |
+| `UPS_IMAGE` | `bsakuramiku/ugreen-ups-panel:0.3.1` | Image version; an image digest can pin the exact artifact |
+| `UPS_BIND_IP` | `127.0.0.1` | Address on which the dashboard listens |
+| `UPS_PORT` | `9086` | Dashboard port |
+| `TZ` | See `.env.example` | Container timezone |
+| `UPS_DATA_DIR` | `./data` | Persistent history directory, mounted at `/data` |
+| `UPS_CAPTURE_DIR` | `/run/ugreen-ups-panel` | Host snapshot directory, mounted read-only at `/capture` |
+
+With the default data directory:
+
+```sh
+# 1. Prepare persistent storage writable by the unprivileged container user.
+sudo install -d -m 0750 -o 10001 -g 10001 data
+
+# 2. Install the host collector without changing the original UPS driver.
 sudo sh scripts/install-collector.sh
 systemctl status ugreen-ups-collector.service
 
-# 2. Build and start the dashboard. It initially listens only on the NAS itself.
-cp .env.example .env
-docker compose up -d --build
+# 3. Pull the image and start the dashboard. Normal installation needs no build.
+docker compose pull
+docker compose up -d
 docker compose ps
 ```
 
-The default port is `9086`. To allow LAN access, edit `UPS_BIND_IP` in `.env` to the NAS's actual LAN address, then run `docker compose up -d` again. This `.env` file configures Compose only. Host collector settings belong in `/etc/ugreen-ups-panel.env`.
+If you change `UPS_DATA_DIR`, prepare that directory with the same write permissions first. Compose will not silently create a missing mount directory. Changing `UPS_CAPTURE_DIR` only changes the container's read location; it must match the collector's actual output directory and does not move the collector's output.
+
+Install the collector once, then update it only when collector code or service configuration changes. Installation fails if no fresh report arrives during its validation window; an upgrade attempts to restore the previous collector and configuration on failure. Routine dashboard-image updates do not require reinstalling the collector.
+
+### Directories and configuration
+
+| Location | Contents |
+| --- | --- |
+| NAS deployment directory | `compose.yaml`, `.env`, installation scripts, and `data/`; run Compose commands here |
+| `data/history.sqlite` under the deployment directory | Default history database, preserved when containers are recreated |
+| `/opt/ugreen-ups-panel/current` | Installed host collector used by systemd |
+| `/etc/ugreen-ups-panel.env` | Device serial, NUT target, and calibration settings |
+| `/run/ugreen-ups-panel/latest.json` | Current telemetry snapshot, not persistent history |
+| Full source checkout on a development computer | Code changes, tests, and image builds; not the NAS's runtime data directory |
+
+The deployment `.env` configures Compose only. Host collector settings belong in `/etc/ugreen-ups-panel.env`. The default Compose project name is fixed to `ugreen-ups-panel`, so renaming the deployment directory does not silently create a separate project.
 
 A first installation uses calibration profile `none`, so it does not apply coefficients derived from the development unit. Upgrades preserve existing configuration. To select a device or change the NUT target, edit `/etc/ugreen-ups-panel.env` and restart this project's collector. Do not commit serial numbers or local configuration to the repository.
 
@@ -73,7 +111,7 @@ curl --fail http://127.0.0.1:9086/api/health
 
 `service: ok` means that the HTTP service is responding; `capture_fresh` indicates whether telemetry is current. The UI reports capture, NUT lookup, and history-storage status separately. Container health is not a substitute for checking the NAS's UPS protection service.
 
-The container runs as UID `10001`, with a read-only root filesystem and all capabilities dropped. It reads the snapshot directory and writes only to its own data volume. The collector runs as a root service restricted by systemd because it needs host usbmon access. usbmon observes a USB bus before the application filters for the target device, so this permission is broader than access to a single UPS. See [security notes](SECURITY.md).
+The container runs as UID `10001`, with a read-only root filesystem and all capabilities dropped. It reads the snapshot directory and writes only to its own data directory. The collector runs as a root service restricted by systemd because it needs host usbmon access. usbmon observes a USB bus before the application filters for the target device, so this permission is broader than access to a single UPS. See [security notes](SECURITY.md).
 
 ### Optional power model
 
@@ -87,9 +125,44 @@ sudo sh scripts/install-collector.sh --calibration-profile local-19v-v1
 
 Use `--calibration-profile none` to disable it again. The AC estimate includes empirical charging compensation and an 8-second trailing average; the battery estimate relies on a nominal-capacity assumption. Neither establishes the actual DC power delivered to the NAS or calibrates the raw output-current field. The formulas, validation ranges, and assumptions are documented in [Power calibration](docs/calibration.md).
 
+## Migrating history from 0.3.0
+
+Version 0.3.0 used a Docker named volume for history by default; 0.3.1 uses `./data`. Starting the new Compose configuration points it at a different database location and **does not automatically bring the old history across**. Preserve the old Compose file, `.env`, image, and database backup, then extract the new deployment package into a new deployment directory. Create `.env` from `.env.example` there and transfer the required listener, port, and other settings without overwriting the old deployment.
+
+On the NAS, identify the old dashboard container and the source mounted at its `/data`. Replace `OLD_PANEL_CONTAINER` below with the old dashboard container you have identified; do not select NUT or another service.
+
+```sh
+docker ps -a --filter label=com.docker.compose.service=panel --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+OLD_PANEL_CONTAINER=your-old-panel-container
+OLD_DATA_DIR=$(docker inspect "$OLD_PANEL_CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}')
+printf '%s\n' "$OLD_DATA_DIR"
+```
+
+After confirming that the output is the absolute directory containing the old database, run migration from the **new deployment directory**. `./data` must not exist yet, so skip the new-install `install -d ... data` command.
+
+```sh
+# Confirm the new .env image, data directory, listener, and port, then pull first.
+# Proceed only when the previous step succeeds; a failed pull does not stop it.
+# Stop only the old dashboard's database writer.
+# Keep the host collector and the NAS's original UPS service running.
+docker compose pull &&
+docker stop "$OLD_PANEL_CONTAINER" &&
+sudo python3 scripts/migrate-history.py --source "$OLD_DATA_DIR/history.sqlite" --destination ./data --panel-stopped &&
+docker compose up -d
+```
+
+The migration tool uses SQLite's backup API to create the destination database and preserves the original database and volume. `--panel-stopped` confirms that you have stopped the writer; it does not replace actually stopping the old dashboard. If the destination directory already exists, choose a new, nonexistent directory and update `UPS_DATA_DIR` in `.env` accordingly instead of overwriting existing history.
+
+After startup, check older periods in the charts, CSV export, and database status. On failure, retain the old deployment and resolve the cause before retrying. To restore the old deployment, stop the new dashboard first and use the original Compose configuration and volume. Do not remove the old volume before verifying migration, and do not run `docker compose down -v`.
+
 ## Local demo and development
 
-Replay mode works without a UPS, is visibly marked as a demo, and does not query NUT. Local frontend development requires a compatible Node.js version; Node.js 22.12+ is suitable for the current Vite toolchain. Docker builds include their own Node runtime.
+**This section requires the full source checkout. The lightweight deployment package does not include frontend application sources or the development environment.** Replay mode works without a UPS, is visibly marked as a demo, and does not query NUT. Local frontend development requires a compatible Node.js version; Node.js 22.12+ is suitable for the current Vite toolchain.
+
+```sh
+git clone https://github.com/BSakura-Miku/ugreen-ups-panel.git
+cd ugreen-ups-panel
+```
 
 ```sh
 python3 -m venv .venv
@@ -113,6 +186,14 @@ npm --prefix frontend run build
 docker compose config --quiet
 ```
 
+To build a Docker image from source, use the dedicated override file. Prepare the data directory and a valid snapshot mount first, then run:
+
+```sh
+docker compose -f compose.yaml -f compose.build.yaml up -d --build
+```
+
+That command is for development or self-building. Normal deployments use the default Compose file with `pull` and `up -d`. Docker Desktop can build images; real UPS capture still requires the Linux host. On a computer without that capture environment, use the file-replay demo above.
+
 ## History and backups
 
 - On the validated device, reports arrive approximately every 2 seconds. A sample or collector heartbeat older than 10 seconds is marked stale.
@@ -129,30 +210,35 @@ docker compose exec -T panel python -c "import sqlite3; s=sqlite3.connect('/data
 docker compose cp panel:/data/backup.sqlite ./backup.sqlite
 ```
 
-To restore, stop `panel`, replace `/data/history.sqlite` in its data volume with the backup, remove old `history.sqlite-wal` and `history.sqlite-shm` files in the same directory, and ensure ownership is `10001:10001` before starting the service. Never replace the database while a process is still writing to it.
+To restore, stop `panel`, replace `history.sqlite` in the host data directory with the backup (by default `./data/history.sqlite`, mounted at `/data/history.sqlite` inside the container), remove old `history.sqlite-wal` and `history.sqlite-shm` files in the same directory, and ensure ownership is `10001:10001` before starting the service. Never replace the database while a process is still writing to it.
 
 ## Upgrades, rollback, and removal
 
-Back up the database, Compose configuration, and collector configuration first. Collector releases are stored under `/opt/ugreen-ups-panel/releases/`; `current` points to the active release, and `previous` retains the previous release.
+Back up the database, Compose configuration, and collector configuration first. Check the version and manifest when downloading a new deployment package; preserve `.env` and the data directory when updating program files. Set `UPS_IMAGE` in `.env` to the desired version tag or digest, then pull and recreate the dashboard:
+
+```sh
+docker compose pull panel
+docker compose up -d panel
+docker compose ps
+```
+
+Run `sudo sh scripts/install-collector.sh` additionally only if that release also changes the collector or its systemd configuration. Collector releases are stored under `/opt/ugreen-ups-panel/releases/`; `current` points to the active release, and `previous` retains the previous release.
 
 **Version 0.3.0 upgrades the database to schema 2. Rolling back to a version that only supports the old schema requires restoring the pre-upgrade database backup. Do not let the old application write directly to the upgraded database.** See the [release notes](docs/DELIVERY.md).
 
 ```sh
-sudo sh scripts/install-collector.sh
-docker compose up -d --build
-
 # If you need to roll back the collector
 sudo sh scripts/rollback-collector.sh
 ```
 
-Rolling back the dashboard also requires a saved old image or the previous source version. Recreating the container preserves the history volume; check database compatibility before restoring across versions.
+To roll back the dashboard, set `UPS_IMAGE` to a retained previous tag or digest and run `pull`/`up -d`. Recreating a container preserves the bind-mounted data directory, but database compatibility still needs checking across versions. Dashboard-image rollback and collector rollback are separate operations.
 
 ```sh
 docker compose down
 sudo sh scripts/uninstall-collector.sh
 ```
 
-Removal preserves the history volume, snapshot, and collector release files. If usbmon was not loaded before installation, the script attempts a normal module unload; if it is in use, it remains loaded rather than being forcefully removed. Do not disable the original UPS driver to uninstall the dashboard.
+Removal preserves the host data directory, any older named volume, the snapshot, and collector release files. If usbmon was not loaded before installation, the script attempts a normal module unload; if it is in use, it remains loaded rather than being forcefully removed. Do not disable the original UPS driver to uninstall the dashboard.
 
 ## Frequently asked questions
 

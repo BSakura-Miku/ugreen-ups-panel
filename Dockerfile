@@ -1,4 +1,4 @@
-FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS frontend
+FROM --platform=$BUILDPLATFORM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS frontend
 WORKDIR /build
 COPY frontend/package*.json ./
 RUN npm ci
@@ -7,6 +7,12 @@ RUN npm run build
 
 FROM python:3.12-slim-bookworm@sha256:782412e85d0f0984994c290652577d4018aff08145c85b262bb63dc0c7522254
 WORKDIR /app
+ARG VERSION=0.3.1
+LABEL org.opencontainers.image.title="US3000 Power Monitor" \
+      org.opencontainers.image.description="Read-only UGREEN US3000 dashboard for Linux NAS" \
+      org.opencontainers.image.source="https://github.com/BSakura-Miku/ugreen-ups-panel" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${VERSION}"
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 UPS_STATIC=/app/static
 COPY requirements.lock ./
 COPY LICENSE THIRD_PARTY_NOTICES.txt ./
