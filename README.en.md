@@ -4,9 +4,9 @@
 
 <p align="center"><img src="frontend/src/assets/us3000-logo.png" width="80" height="80" alt="US3000 Monitor logo" /></p>
 
-![US3000 dashboard preview with demonstration data](docs/assets/dashboard-demo.png)
+![US3000 v0.7.0 dashboard: cell reference status and discharge energy records with demonstration data](docs/assets/dashboard-demo.png)
 
-*The preview uses DEMO data, with no real NAS telemetry or serial numbers. The UI and detailed documentation are primarily in Simplified Chinese.*
+*v0.7.0 interface using DEMO data, with no real NAS telemetry or serial numbers. The UI and detailed documentation are primarily in Simplified Chinese.*
 
 A UGREEN US3000 dashboard for power state, battery charge, cell voltages, and historical trends. A host collector uses Linux usbmon to observe existing UPS-driver traffic without writing to the UPS. Docker Compose runs the web dashboard.
 

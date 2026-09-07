@@ -4,9 +4,9 @@
 
 <p align="center"><img src="frontend/src/assets/us3000-logo.png" width="80" height="80" alt="US3000 Monitor Logo" /></p>
 
-![US3000 电力监控面板预览：演示数据](docs/assets/dashboard-demo.png)
+![US3000 v0.7.0 面板预览：电芯参考状态与放电能量记录（演示数据）](docs/assets/dashboard-demo.png)
 
-*预览使用 DEMO 演示数据，不包含实际 NAS 数据或序列号。*
+*v0.7.0 界面，使用 DEMO 演示数据，不包含实际 NAS 数据或序列号。*
 
 为 UGREEN US3000 提供供电状态、电量、电芯电压与历史趋势。宿主机采集器通过 Linux usbmon 只读观察已有 UPS 驱动的数据，Docker Compose 启动网页面板。
 

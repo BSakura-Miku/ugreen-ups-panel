@@ -35,7 +35,7 @@ PATTERNS = (
 
 def validate_content(name, content, location='working tree'):
     if name.endswith('.png'):
-        # The existing dashboard screenshot has a .png name but JPEG bytes.
+        # Check the image signature in addition to its public asset path.
         if not content.startswith((b'\x89PNG\r\n\x1a\n', b'\xff\xd8\xff')):
             raise ValueError(f'Invalid image asset: {name} ({location})')
         return
