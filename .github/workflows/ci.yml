@@ -32,4 +32,5 @@ jobs:
       - name: Validate host collector commands
         run: |
           python -S -m ups_panel.collector --help
+          python -S -m ups_panel.doctor --help
           python -S scripts/collector-admin.py --help

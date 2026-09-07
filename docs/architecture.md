@@ -18,7 +18,7 @@
 
 Docker Desktop 可在开发电脑上构建面板镜像，但这不等于该电脑可以采集 NAS 的 USB 数据。真实采集器需要运行在连接 UPS、具备 Linux usbmon 和原 UPS 驱动的宿主机。容器通过快照文件读取数据，不通过网络自动寻找另一台 NAS。
 
-Compose 默认使用 `bsakuramiku/ugreen-ups-panel:latest`，通过 NAS 的 `9086` 端口提供页面，不需要项目 `.env` 文件。**v0.6.0 需要先更新宿主机采集器，再更新面板容器。** 从临时目录安装时通过 `--data-dir` 沿用原数据目录，保留校准文件和历史；源码无需长期留在 NAS 运行目录。仅面板变更的后续版本仍可执行 `docker compose pull && docker compose up -d`，具体以发布说明为准。
+Compose 默认使用 `bsakuramiku/ugreen-ups-panel:latest`，通过 NAS 的 `9086` 端口提供页面，不需要项目 `.env` 文件。**v0.8.0 的完整诊断需要先更新宿主机采集器，再更新面板容器。** 从临时目录安装时通过 `--data-dir` 沿用原数据目录，保留校准文件和历史；源码无需长期留在 NAS 运行目录。仅面板变更的版本可执行 `docker compose pull && docker compose up -d`，具体以发布说明为准。
 
 ```mermaid
 flowchart LR
@@ -69,6 +69,9 @@ Compose 自动读取 `docker-compose.yaml`。顶层 `name` 是可选参数，默
 | --- | --- |
 | `GET /api/live` | 当前样本、来源、新鲜度、NUT 与记录状态 |
 | `GET /api/health` | 服务可响应状态和采集新鲜度摘要 |
+| `GET /api/diagnostics?minutes=60` | 分层检查、系统原值、版本和 1–60 分钟原始观察 |
+| `GET /api/diagnostics/export.json?minutes=60` | 字段白名单诊断包 |
+| `GET /api/diagnostics/export.csv?minutes=60` | 相同窗口的固定观察列 |
 | `GET /api/calibration` | 已保存配置、采集器实际配置、公式与生效状态 |
 | `PUT /api/calibration` | 校验并原子保存所选配置和自定义系数 |
 | `GET /api/history?hours=24` | 1–8760 小时（365 天）的聚合历史，包含均值、极值与实际记录跨度 |
@@ -79,6 +82,8 @@ Compose 自动读取 `docker-compose.yaml`。顶层 `name` 是可选参数，默
 校准仍使用 `GET/PUT /api/calibration`。新版页面发送 `X-UPS-Calibration-Version: 2`；响应提供 `supported_config_schemas`，采集器快照也声明支持 schema 1、2。新版 `custom` 的 PUT 在原 `profile`、`coefficients`、`expected_revision` 外增加 `ac_voltage_nominal_v`，请求体不传 `schema`。服务端同时检查页面和采集器能力：旧页面不能覆盖 schema 2 配置，会提示刷新；旧采集器需先升级，不能接受新版配置。
 
 ### 分层历史
+
+v0.8.0 的原始字节观察使用独立后台任务维护内存窗口，最多 60 分钟和 4096 点，不向分层历史数据库添加字段，也不回填旧数据。它与压差观察共同读取快照，和 SQLite 写入任务分开；只读 HTTP 查询不推进计数。诊断与默认脱敏导出的字段边界见[诊断与原始观察](diagnostics.md)。
 
 | 统计粒度 | 保留周期 | 用途 |
 | --- | --- | --- |

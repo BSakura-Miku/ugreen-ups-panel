@@ -22,7 +22,9 @@
 - 查看每次电池供电的起止时间、观测时长、起止电量，以及次数和电量净下降。
 - 记录观测范围内的估算放电量（Wh）、有效覆盖率和功率依据。
 - 用手工交流读数分步校准，或直接查看、调整功率系数；支持确认 12/19/20 V 适配器输入。
-- 查看硬件资料、NUT 状态与采集诊断。
+- 分层检查连接、私有报文与系统 UPS 状态，查看各组件版本并下载脱敏诊断包。
+- 观察疑似温度 A/B 的 15/60 分钟原始字节趋势，按工况分段并导出 CSV；字段含义仍未验证。
+- 查看硬件资料与协议说明。
 
 趋势可选 1 小时、24 小时、7 天、30 天、90 天、半年（180 天）和一年（365 天）。超过 90 天使用按日统计；图表保留完整所选时间范围，尚未采集或中断的部分留空，已有几天数据就只显示几天。
 
@@ -31,6 +33,8 @@
 v0.7.0 的压差等级仅在连续待机 30 分钟、当前区间持续 2 分钟后确认，是项目参考提示，不是厂商健康标准。估算放电量从新版启用后的有效电池采样开始记录，需要已配置的电池倍率；旧记录不补算，无倍率时显示暂无估算。两项均不提供容量或 SOH 百分比，详见[电池观察说明](docs/battery-observation.md)。
 
 功率相关字段仍有协议解释和测点限制；可选经验模型默认关闭（校准配置 `none`），不套用开发样机系数，详见[功率校准](docs/calibration.md)。
+
+v0.8.0 的「诊断与说明」页分别呈现私有采集和 NUT 查询的状态，系统告警均注明来源。A/B 暂不标温度单位或探头位置；短时观察最多保留 60 分钟、4096 点，重建容器后重新开始。诊断包按字段白名单导出，详见[诊断与原始观察](docs/diagnostics.md)。
 
 ## 安装前提
 
@@ -107,21 +111,14 @@ services:
 
 ## 更新
 
-**已有 v0.6.0 采集器时，升级 v0.7.0 只需更新面板。** 先按[备份说明](docs/architecture.md#备份与维护)保存数据库和校准配置。以下路径改成实际部署路径；所有 Compose 命令沿用原项目名，曾自定义项目名时统一加 `-p 原项目名`。
-
-```sh
-sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml pull
-sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml up -d
-```
-
-若采集器仍早于 v0.6.0，使用下面的兼容升级步骤，先更新采集器再更新面板，支持分步校准和完整的功率依据。源码下载到临时目录，安装后清理，原 `data` 与 `docker-compose.yaml` 保留。
+**v0.8.0 完整诊断需先更新宿主机采集器，再更新面板。** 先按[备份说明](docs/architecture.md#备份与维护)保存数据库和校准配置。以下路径改成实际部署路径；所有 Compose 命令沿用原项目名，曾自定义项目名时统一加 `-p 原项目名`。源码下载到临时目录，安装后清理，原 `data` 与 `docker-compose.yaml` 保留。旧采集器仍可提供已有遥测，新增环境、版本及部分系统信息会显示未知。
 
 ```sh
 (
   set -eu
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT
-  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.6.0 -o "$tmp_dir/source.tar.gz"
+  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.8.0 -o "$tmp_dir/source.tar.gz"
   tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir"
   sudo sh "$tmp_dir/scripts/install-collector.sh" --data-dir /volume1/docker/ugreen-ups-panel/data
   sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml pull
@@ -206,11 +203,18 @@ sudo docker compose config
 
 ## 没有数据时
 
-先查看采集器和面板日志：
+先打开「诊断与说明」，区分私有报文、系统查询和历史写入问题。宿主机可运行已安装版本的只读自检：
+
+```sh
+cd /opt/ugreen-ups-panel/current
+sudo python3 -m ups_panel.doctor
+```
+
+使用非默认安装路径时，请在实际采集器源码目录运行，具体定位与导出方法见[诊断说明](docs/diagnostics.md)。需要进一步排查时查看日志；日志可能包含设备标识，分享前自行检查：
 
 ```sh
 journalctl -u ugreen-ups-collector.service -n 50 --no-pager
-docker compose logs --tail 50
+docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml logs --tail 50
 ```
 
 NUT 能显示电量，不一定意味着驱动会读取面板所需的完整报告。安装条件与已知限制见[验证范围](docs/validation.md)。
@@ -218,7 +222,7 @@ NUT 能显示电量，不一定意味着驱动会读取面板所需的完整报�
 ## 更多文档
 
 - [架构与数据流](docs/architecture.md) · [协议字段](docs/fields.md) · [功率校准](docs/calibration.md)
-- [硬件资料](docs/hardware.md) · [验证范围](docs/validation.md) · [更新记录](CHANGELOG.md)
+- [诊断与原始观察](docs/diagnostics.md) · [硬件资料](docs/hardware.md) · [验证范围](docs/validation.md) · [更新记录](CHANGELOG.md)
 - [开发与贡献](CONTRIBUTING.md) · [安全说明](SECURITY.md)
 
 ## 参考与致谢

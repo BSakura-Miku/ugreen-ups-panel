@@ -17,6 +17,8 @@ from fastapi.staticfiles import StaticFiles
 from .storage import CONTEXT_FIELDS, Store, METRICS
 from .power import finite_number
 from .cell_balance import CellBalanceMonitor
+from .raw_observation import RawObservationMonitor
+from .diagnostics import diagnostic_view, diagnostic_export, observation_csv
 from .calibration import (CalibrationError, DEFAULT_COEFFICIENTS, default_config,
                           load_config, normalize_config, save_config)
 
@@ -99,12 +101,15 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
     state = {'store': None, 'storage_error': None, 'last_success': 0,
              'observation_ready': asyncio.Event()}
     cell_balance = CellBalanceMonitor()
+    raw_observation = RawObservationMonitor()
 
     async def observe_cells():
         while True:
             # Disk writes can wait on SQLite locks; voltage observation must
             # keep its own cadence. HTTP reads never advance this clock.
-            cell_balance.ingest(load_snapshot(snapshot))
+            view = load_snapshot(snapshot)
+            cell_balance.ingest(view)
+            raw_observation.ingest(view)
             ready = state['observation_ready']
             state['observation_ready'] = asyncio.Event()
             ready.set()
@@ -176,6 +181,31 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
         return {'service': 'ok', 'capture_fresh': load_snapshot(snapshot)['fresh'],
                 'storage_error': state['storage_error'],
                 'storage_dropped_buckets': state['store'].dropped_buckets if state['store'] else 0}
+
+    def diagnostics_data(minutes):
+        view = load_snapshot(snapshot)
+        now = view['server_time']
+        observation = raw_observation.snapshot(view, now=now, minutes=minutes)
+        return diagnostic_view(view, observation, now=now,
+                               storage_ready=bool(state['last_success']),
+                               storage_error=state['storage_error'])
+
+    @app.get('/api/diagnostics')
+    def diagnostics(minutes: int = Query(60, ge=1, le=60)):
+        return diagnostics_data(minutes)
+
+    @app.get('/api/diagnostics/export.json')
+    def export_diagnostics(minutes: int = Query(60, ge=1, le=60)):
+        payload = diagnostic_export(diagnostics_data(minutes))
+        return Response(json.dumps(payload, ensure_ascii=False, allow_nan=False, indent=2) + '\n',
+                        media_type='application/json',
+                        headers={'Content-Disposition': 'attachment; filename="us3000-diagnostics.json"'})
+
+    @app.get('/api/diagnostics/export.csv')
+    def export_observation(minutes: int = Query(60, ge=1, le=60)):
+        return Response('\ufeff' + observation_csv(diagnostics_data(minutes)),
+                        media_type='text/csv; charset=utf-8',
+                        headers={'Content-Disposition': 'attachment; filename="us3000-observation.csv"'})
 
     def calibration_status():
         view = load_snapshot(snapshot)

@@ -7,13 +7,15 @@ RUN npm run build
 
 FROM python:3.12-slim-bookworm@sha256:782412e85d0f0984994c290652577d4018aff08145c85b262bb63dc0c7522254
 WORKDIR /app
-ARG VERSION=0.7.0
+ARG VERSION=0.8.0
+ARG VCS_REF
 LABEL org.opencontainers.image.title="US3000 Power Monitor" \
       org.opencontainers.image.description="Read-only UGREEN US3000 dashboard for Linux NAS" \
       org.opencontainers.image.source="https://github.com/BSakura-Miku/ugreen-ups-panel" \
       org.opencontainers.image.licenses="MIT" \
-      org.opencontainers.image.version="${VERSION}"
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 UPS_STATIC=/app/static
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${VCS_REF}"
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 UPS_STATIC=/app/static UPS_BUILD_REVISION=${VCS_REF}
 COPY requirements.lock ./
 COPY LICENSE THIRD_PARTY_NOTICES.txt ./
 RUN pip install --no-cache-dir -r requirements.lock && useradd --uid 10001 --create-home panel && mkdir /data && chown panel:panel /data

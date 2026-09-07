@@ -146,7 +146,7 @@ def installation_data_directory(source, data_dir):
 
 
 def install(source, profile=None, data_dir=None):
-    for filename in ('__init__.py', 'collector.py', 'protocol.py', 'power.py', 'calibration.py', 'usbmon.py'):
+    for filename in ('__init__.py', 'collector.py', 'protocol.py', 'power.py', 'calibration.py', 'usbmon.py', 'build_info.py', 'doctor.py'):
         if not (source / 'ups_panel' / filename).is_file():
             raise ValueError(f'Collector source is incomplete: {filename}')
     for filename in ('ugreen-ups-collector.service', 'ugreen-ups-panel.tmpfiles.conf'):

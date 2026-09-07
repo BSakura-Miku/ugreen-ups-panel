@@ -50,7 +50,7 @@ def admin(tmp_path, monkeypatch):
     monkeypatch.setattr(module, 'validate_fresh', lambda started: None)
     source = tmp_path / 'source'
     (source / 'ups_panel').mkdir(parents=True)
-    for filename in ('__init__.py', 'collector.py', 'protocol.py', 'power.py', 'calibration.py', 'usbmon.py'):
+    for filename in ('__init__.py', 'collector.py', 'protocol.py', 'power.py', 'calibration.py', 'usbmon.py', 'build_info.py', 'doctor.py'):
         (source / 'ups_panel' / filename).write_text("VERSION = 'new'\n")
     (source / 'deploy').mkdir()
     for name, filename in [('service', 'ugreen-ups-collector.service'),

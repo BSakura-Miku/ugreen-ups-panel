@@ -28,17 +28,38 @@ def discover(root: Path = Path('/sys/bus/usb/devices'), serial: str = ''):
     return matches[0] if matches else None
 
 
-def decode_event(header: bytes, payload: bytes, bus: int, device: int):
+def classify_event(header: bytes, payload: bytes, bus: int, device: int):
+    """Classify one event without retaining payloads or naming unrelated devices.
+
+    Acceptance is deliberately shared with ``decode_event``. Diagnostic categories
+    must never relax the production filter, including cancelled/truncated transfers.
+    Short headers cannot safely be attributed to the target and are not activity.
+    """
     if len(header) != 64:
-        return None
+        return 'invalid_header'
+    if header[11] != device or struct.unpack_from('=H', header, 12)[0] != bus:
+        return 'unrelated'
+    if header[8] != ord('C'):
+        return 'not_completion'
+    if header[9] != 1 or header[10] != 0x81:
+        return 'not_interrupt_in'
     status, length, captured = struct.unpack_from('=iII', header, 28)
-    if (header[8] != ord('C') or header[9] != 1 or header[10] != 0x81
-            or header[11] != device or struct.unpack_from('=H', header, 12)[0] != bus
-            or header[15] != 0 or status not in (0, -2)
-            or length != captured or captured != len(payload)
-            or not 64 <= length <= 4096 or length % 64
-            or any(payload[i] != 0x71 for i in range(0, length, 64))):
+    if status not in (0, -2):
+        return 'invalid_status'
+    if header[15] != 0:
+        return 'missing_payload'
+    if (length != captured or captured != len(payload)
+            or not 64 <= length <= 4096 or length % 64):
+        return 'invalid_length'
+    if any(payload[i] != 0x71 for i in range(0, length, 64)):
+        return 'invalid_report_id'
+    return 'accepted'
+
+
+def decode_event(header: bytes, payload: bytes, bus: int, device: int):
+    if classify_event(header, payload, bus, device) != 'accepted':
         return None
+    status = struct.unpack_from('=i', header, 28)[0]
     sec = struct.unpack_from('=q', header, 16)[0]
     usec = struct.unpack_from('=i', header, 24)[0]
     # NUT requests 512 bytes and can accumulate several reports before cancellation.

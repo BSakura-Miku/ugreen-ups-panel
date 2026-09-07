@@ -90,14 +90,19 @@ def snapshot(timestamp: float) -> dict:
             'battery_charge_power_candidate_w': None,
             'battery_discharge_power_candidate_w': None,
             'raw_fields': {'be_u16': {'16': 19010, '18': 18990, '24': 2000},
-                           'byte_28': 50, 'frame_hex': ''},
+                           'byte_26': 41, 'byte_27': 48, 'byte_28': 50,
+                           'frame_hex': '71' + '42' * 63},
         },
     }
 
 
 def write_snapshot(capture: Path, timestamp: float):
+    write_capture(capture, snapshot(timestamp))
+
+
+def write_capture(capture: Path, value: dict):
     temporary = capture / 'latest.json.new'
-    temporary.write_text(json.dumps(snapshot(timestamp)), encoding='utf-8')
+    temporary.write_text(json.dumps(value), encoding='utf-8')
     temporary.chmod(0o644)
     temporary.replace(capture / 'latest.json')
 
@@ -431,6 +436,136 @@ print(json.dumps({'uid': os.getuid(), 'machine': platform.machine(),
 '''
 
 
+# Exercise the real HTTP routes in the same isolated image. The host controls
+# only the disposable capture mount; neither probe starts a collector or NUT.
+DIAGNOSTICS_PROBE = r'''
+import csv, io, json, re, sys, time
+from urllib.request import ProxyHandler, build_opener
+
+opener = build_opener(ProxyHandler({}))
+mode = sys.argv[1]
+
+def get(path):
+    with opener.open('http://127.0.0.1:8080' + path, timeout=3) as response:
+        headers = {key.lower(): value for key, value in response.headers.items()}
+        assert headers.get('cache-control') == 'no-store', 'Diagnostics must disable caching'
+        return response.read(), headers
+
+def diagnostics():
+    body, headers = get('/api/diagnostics?minutes=15')
+    assert 'application/json' in headers.get('content-type', '')
+    data = json.loads(body)
+    assert data['schema'] == data['observation']['schema'] == 1
+    assert data['versions']['panel']['version'] == '0.8.0', 'Unexpected installed panel version'
+    assert data['versions']['collector'] is None, 'Missing collector version was invented'
+    assert data['versions']['usb_device_version'] is None, 'Missing USB version was invented'
+    assert data['observation']['window_sec'] == 900 and data['observation']['max_samples'] == 4096
+    assert data['observation']['count'] == len(data['observation']['points'])
+    return data
+
+def wait_for(predicate):
+    deadline = time.monotonic() + 8
+    while True:
+        data = diagnostics()
+        if predicate(data):
+            return data
+        assert time.monotonic() < deadline, 'Diagnostic observer did not accept the expected fixture'
+        time.sleep(.1)
+
+def check_no_usb(data):
+    checks = {item['id']: item for item in data['connection']['checks']}
+    for key in ('host', 'usbmon', 'usb', 'private_report', 'association'):
+        assert checks[key]['status'] != 'ok', 'No USB/collector evidence was misreported as confirmed: ' + key
+    assert data['connection']['association'] == 'unverified' and data['connection']['pollonly'] is None
+    assert data['connection']['counters'] == {}, 'Missing capture counters became measured zeroes'
+
+def check_exports(data, private=False):
+    json_body, json_headers = get('/api/diagnostics/export.json?minutes=15')
+    csv_body, csv_headers = get('/api/diagnostics/export.csv?minutes=15')
+    assert 'application/json' in json_headers.get('content-type', '')
+    assert 'text/csv' in csv_headers.get('content-type', '')
+    for headers in (json_headers, csv_headers):
+        assert headers.get('content-disposition', '').startswith('attachment;'), 'Export is not a download'
+    export = json.loads(json_body)
+    assert export['schema'] == 1 and export['format'] == 'us3000-diagnostics'
+    assert export['versions']['panel']['version'] == '0.8.0'
+    assert export['privacy']['mode'] == 'allowlist'
+    def check_keys(value):
+        if isinstance(value, dict):
+            assert not ({'serial', 'target', 'address', 'path', 'frame_hex', 'raw_fields', 'alarm_text'} & set(value)), 'Export included a private field'
+            for child in value.values():
+                check_keys(child)
+        elif isinstance(value, list):
+            for child in value:
+                check_keys(child)
+    check_keys(export)
+    assert 'latest' not in export['observation'], 'Export included the unfiltered latest object'
+    points = export['observation']['points']
+    fields = ('timestamp', 'segment', 'device_alias', 'source', 'mode', 'raw_status',
+              'byte_26', 'byte_27', 'byte_28', 'soc', 'battery_voltage',
+              'adapter_input_voltage_v', 'ups_output_voltage_v', 'current',
+              'battery_charge_current_candidate_a', 'battery_discharge_current_candidate_a',
+              'decoder_version', 'formula_version', 'calibration_revision', 'calibration_profile')
+    reader = csv.DictReader(io.StringIO(csv_body.decode('utf-8-sig')))
+    rows = list(reader)
+    assert reader.fieldnames == list(fields), 'Observation CSV columns changed or contain extra fields'
+    assert points and rows, 'Diagnostic exports omitted observed replay points'
+    assert all(set(point) == set(fields) and re.fullmatch(r'device-[a-f0-9]{8,32}', point['device_alias']) for point in points)
+    assert all(point['byte_26'] == 41 and point['byte_27'] == 48 and point['source'] == 'replay' for point in points)
+    assert all(row['byte_26'] == '41' and row['byte_27'] == '48' for row in rows)
+    for marker in ('SMOKE-TEST', 'SMOKE-NUT-TARGET', '192.0.2.123', '/SMOKE-USB-PATH',
+                   'SMOKE-FREE-ALARM', 'SMOKE-FREE-STATUS', 'SMOKE-FREE-VERSION', '71' + '42' * 63):
+        assert marker.encode() not in json_body and marker.encode() not in csv_body, 'Export leaked fixture marker: ' + marker
+    assert 'alarm_text' not in export['system'] and 'ups.alarm' not in export['system']['values']
+    if private:
+        # Prove the canaries reached the live route before accepting their absence
+        # in exports. Do not make this a vacuous check of unavailable NUT data.
+        assert data['system']['fresh'] and data['system']['alarm_text'] == 'SMOKE-FREE-ALARM'
+        assert 'SMOKE-FREE-STATUS' in data['system']['status_raw']
+        assert data['versions']['ups_firmware'] == 'SMOKE-FREE-VERSION'
+        assert data['system']['runtime']['quality'] == 'sentinel'
+        assert data['system']['runtime']['seconds'] is None and data['system']['runtime']['raw'] == '65535'
+        assert export['system']['free_text_alarm_present'] is True
+        assert export['system']['status_tokens'] == ['OL', 'ALARM']
+        assert export['versions']['ups_firmware'] is None
+        assert len(points) == len(rows) == data['observation']['count'], 'Frozen export window gained or lost points'
+    return len(points)
+
+if mode == 'growing':
+    first = wait_for(lambda data: data['observation']['count'] >= 1)
+    data = wait_for(lambda data: data['observation']['count'] > first['observation']['count'])
+    check_no_usb(data)
+    assert data['capture_fresh'] and data['observation']['latest']['fresh']
+    assert data['system']['available'] is False and data['system']['fresh'] is False
+    assert data['system']['runtime']['quality'] == 'unavailable'
+    assert data['system']['runtime']['raw'] is None and data['system']['thresholds']['charge_low'] is None
+    assert {item['id']: item for item in data['connection']['checks']}['nut']['status'] != 'ok'
+    count = check_exports(data)
+elif mode == 'frozen':
+    expected = float(sys.argv[2])
+    data = wait_for(lambda data: data['observation']['latest']['timestamp'] == expected and data['observation']['latest']['observed'])
+    check_no_usb(data)
+    baseline = data['observation']
+    for _ in range(6):
+        current = diagnostics()['observation']
+        for key in ('count', 'points', 'gap_count', 'conflict_count', 'rejected_count'):
+            assert current[key] == baseline[key], 'GET requests manufactured or changed observations: ' + key
+    count = check_exports(data, private=True)
+else:
+    assert mode in ('stale', 'missing'), 'Unknown diagnostic smoke phase'
+    data = diagnostics()
+    check_no_usb(data)
+    assert data['capture_fresh'] is False and data['system']['fresh'] is False
+    latest = data['observation']['latest']
+    assert latest['fresh'] is False and latest['observed'] is False
+    assert all(latest[key] is None for key in ('timestamp', 'byte_26', 'byte_27', 'byte_28', 'mode', 'source', 'device_alias'))
+    assert data['system']['alarm_text'] is None and data['system']['thresholds']['charge_low'] is None
+    assert {item['id']: item for item in data['connection']['checks']}['nut']['status'] != 'ok'
+    count = check_exports(data)
+print(json.dumps({'phase': mode, 'diagnostic_points': count, 'checks': 'passed'}))
+'''
+
+
 def cleanup(name: str, token: str):
     """Remove only a container carrying the exact token created by this run."""
     result = docker('inspect', name, check=False, timeout=15)
@@ -496,11 +631,28 @@ def run(image: str, platform: str | None):
             expected_machine = {'linux/amd64': 'x86_64', 'linux/arm64': 'aarch64'}.get(platform)
             if expected_machine and report['machine'] != expected_machine:
                 raise SmokeError(f"Requested {platform}, but container runs on {report['machine']}.")
-            # Confirm stale captures cannot remain labelled as fresh.
+            diagnostic_growth = json.loads(docker('exec', name, 'python', '-c',
+                                                  DIAGNOSTICS_PROBE, 'growing', timeout=30).stdout)
+            # Stop host updates before checking read-only and stale diagnostics.
             stop.set()
             writer.join(timeout=3)
             if writer.is_alive():
                 raise SmokeError('Fixture refresh thread did not stop.')
+            # Freeze one real timestamp so background polls and repeated HTTP
+            # reads cannot claim new observations. NUT canaries are synthetic.
+            frozen_at = time.time() - .2
+            frozen = snapshot(frozen_at)
+            frozen['device'].update(path='/SMOKE-USB-PATH', address='192.0.2.123')
+            frozen['nut'] = {
+                'available': True, 'timestamp': frozen_at, 'target': 'SMOKE-NUT-TARGET@192.0.2.123',
+                'values': {'ups.status': 'OL ALARM SMOKE-FREE-STATUS', 'ups.alarm': 'SMOKE-FREE-ALARM',
+                           'battery.runtime': '65535', 'battery.charge.low': '20',
+                           'driver.name': 'usbhid-ups', 'driver.version': '2.8.1',
+                           'ups.firmware': 'SMOKE-FREE-VERSION'},
+            }
+            write_capture(capture, frozen)
+            diagnostic_frozen = json.loads(docker('exec', name, 'python', '-c',
+                                                  DIAGNOSTICS_PROBE, 'frozen', str(frozen_at), timeout=30).stdout)
             write_snapshot(capture, time.time() - 60)
             docker('exec', name, 'python', '-c',
                 "import json,urllib.request; o=urllib.request.build_opener(urllib.request.ProxyHandler({})); "
@@ -511,11 +663,19 @@ def run(image: str, platform: str | None):
                 "assert b['level'] is None and b['delta_mv'] is None and not b['observed']; "
                 "assert b['recent_sample_count']==0 and b['sample_timestamp'] is None; "
                 "print('stale capture and cell grade hidden')")
+            docker('exec', name, 'python', '-c', DIAGNOSTICS_PROBE, 'stale', timeout=30)
+            (capture / 'latest.json').unlink()
+            docker('exec', name, 'python', '-c', DIAGNOSTICS_PROBE, 'missing', timeout=30)
             report.update(image=image, image_id=metadata['Id'],
                           platform=platform or 'linux/' + {
                               'x86_64': 'amd64', 'aarch64': 'arm64',
                           }.get(report['machine'], metadata['Architecture']),
-                          stale_capture='passed', stale_cell_balance='passed')
+                          stale_capture='passed', stale_cell_balance='passed',
+                          diagnostic_api='passed', diagnostic_exports='passed',
+                          diagnostic_growth=diagnostic_growth['diagnostic_points'],
+                          diagnostic_frozen_points=diagnostic_frozen['diagnostic_points'],
+                          diagnostic_readonly='passed', diagnostic_privacy='passed',
+                          stale_diagnostics='passed', missing_capture_diagnostics='passed')
             print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
         except BaseException:
             if attempted:

@@ -22,7 +22,9 @@ A UGREEN US3000 dashboard for power state, battery charge, cell voltages, and hi
 - Individual battery-power records with start/end times, observed duration, start/end charge, occurrence counts, and net charge decrease.
 - Estimated discharge energy in Wh within observed intervals, with coverage and power provenance.
 - A step-by-step assistant using manually entered AC readings, with confirmed 12/19/20 V adapter input and editable coefficients.
-- Hardware references, NUT status, and capture diagnostics.
+- Layered connection checks, system UPS reports, component versions, and an allowlisted diagnostic download.
+- 15/60-minute raw-byte trends and CSV for suspected-temperature channels A/B, segmented by operating context; their meaning remains unverified.
+- Hardware references and protocol notes.
 
 Trend ranges include 1 hour, 24 hours, 7 days, 30 days, 90 days, half a year (180 days), and one year (365 days). Ranges longer than 90 days use daily aggregates. Charts keep the entire selected time range, leaving unrecorded periods and gaps empty; a few days of data remain a few days of data.
 
@@ -31,6 +33,8 @@ Battery-power records begin with valid sampling after first enabling v0.5.0 or l
 In v0.7.0, reference levels require 30 minutes of continuous standby and 2 minutes in the current voltage-difference band. These are project guidance, not manufacturer health limits. Estimated discharge energy starts with valid samples observed by the new version and requires a configured battery gain; older records are not backfilled. Neither feature reports full battery capacity or SOH. See [battery observations](docs/battery-observation.md).
 
 Power fields still have protocol and measurement-location limitations. The optional empirical model is disabled by default (calibration profile `none`), so coefficients from the development unit are not applied. See [power calibration](docs/calibration.md).
+
+The v0.8.0 diagnostics page separates private capture from NUT queries and labels system-reported warnings. A/B have no temperature unit or sensor attribution. The in-memory window holds up to 60 minutes and 4096 points and restarts with the container. Downloads use a field allowlist; see [diagnostics and raw observations](docs/diagnostics.md).
 
 ## Prerequisites
 
@@ -62,21 +66,14 @@ Successful installation starts the collector and enables it at boot.
 
 ## Update
 
-**With a v0.6.0 collector already installed, v0.7.0 only needs a dashboard update.** Follow the [backup instructions](docs/architecture.md#备份与维护) first. Replace the paths below with your existing deployment path and keep the original Compose project name; add `-p original-project-name` consistently if you previously set a custom name.
-
-```sh
-sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml pull
-sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml up -d
-```
-
-For a collector older than v0.6.0, use the compatibility upgrade below to update the collector before the dashboard, providing the calibration assistant and complete power provenance. Temporary source files are removed afterward; existing `data` and `docker-compose.yaml` are retained.
+**For complete v0.8.0 diagnostics, update the host collector before the dashboard.** Follow the [backup instructions](docs/architecture.md#备份与维护) first. Replace the paths below with your existing deployment path and keep the original Compose project name; add `-p original-project-name` consistently if you previously set a custom name. Temporary source files are removed afterward; existing `data` and `docker-compose.yaml` are retained. Older collectors remain compatible with existing telemetry; new environment, version, and some system fields display as unknown.
 
 ```sh
 (
   set -eu
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT
-  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.6.0 -o "$tmp_dir/source.tar.gz"
+  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.8.0 -o "$tmp_dir/source.tar.gz"
   tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir"
   sudo sh "$tmp_dir/scripts/install-collector.sh" --data-dir /volume1/docker/ugreen-ups-panel/data
   sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml pull
@@ -161,11 +158,18 @@ The directory gets mode `0750`; existing `history.sqlite`, `history.sqlite-wal`,
 
 ## If there is no data
 
-Check the collector and dashboard logs:
+Open **诊断与说明** to distinguish private-report, system-query, and history-write issues. On the NAS host, run the installed collector's read-only diagnosis:
+
+```sh
+cd /opt/ugreen-ups-panel/current
+sudo python3 -m ups_panel.doctor
+```
+
+For a custom installation path, use the collector's actual source directory. See [diagnostics](docs/diagnostics.md) for optional passive observation and allowlisted downloads. For further investigation, check logs using your original deployment path and Compose project name. Logs may contain identifiers; review them before sharing:
 
 ```sh
 journalctl -u ugreen-ups-collector.service -n 50 --no-pager
-docker compose logs --tail 50
+docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml logs --tail 50
 ```
 
 NUT displaying a charge percentage does not prove that the driver reads the complete reports this dashboard needs. See [validation scope](docs/validation.md) for requirements and known limitations.
@@ -173,7 +177,7 @@ NUT displaying a charge percentage does not prove that the driver reads the comp
 ## More documentation
 
 - [Architecture and data flow](docs/architecture.md) · [Protocol fields](docs/fields.md) · [Power calibration](docs/calibration.md)
-- [Hardware reference](docs/hardware.md) · [Validation scope](docs/validation.md) · [Changelog](CHANGELOG.md)
+- [Diagnostics and raw observations](docs/diagnostics.md) · [Hardware reference](docs/hardware.md) · [Validation scope](docs/validation.md) · [Changelog](CHANGELOG.md)
 - [Development and contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
 ## References and acknowledgments

@@ -189,3 +189,92 @@ export type LiveView = {
   diagnostics?: { frames?: number; dropped?: number; rejected?: number; error?: string };
   storage_error?: string | null;
 };
+
+export type DiagnosticBuild = { version: string | null; revision: string | null; source_sha256?: string | null };
+export type DiagnosticCheck = {
+  id: string;
+  label: string;
+  status: 'ok' | 'waiting' | 'warning' | 'unknown' | 'error';
+  detail: string;
+};
+export type RawObservationPoint = {
+  timestamp: number;
+  segment: number;
+  device_alias: string;
+  source: 'usbmon' | 'replay';
+  mode: 'online' | 'charging' | 'battery' | 'unknown';
+  raw_status: number | null;
+  byte_26: number;
+  byte_27: number;
+  byte_28: number | null;
+  soc: number | null;
+  battery_voltage: number | null;
+  adapter_input_voltage_v: number | null;
+  ups_output_voltage_v: number | null;
+  current: number | null;
+  battery_charge_current_candidate_a: number | null;
+  battery_discharge_current_candidate_a: number | null;
+  decoder_version: number | null;
+  formula_version: number | null;
+  calibration_revision: string | null;
+  calibration_profile: string | null;
+};
+export type DiagnosticView = {
+  schema: 1;
+  generated_at: number;
+  capture_fresh: boolean;
+  versions: {
+    panel: DiagnosticBuild;
+    collector: DiagnosticBuild | null;
+    nut_driver: string | null;
+    nut_version: string | null;
+    nut_subdriver: string | null;
+    ups_firmware: string | null;
+    usb_device_version: string | null;
+    decoder_version: number | null;
+  };
+  connection: {
+    checks: DiagnosticCheck[];
+    usb_age_sec: number | null;
+    nut_query_age_sec: number | null;
+    pollonly: boolean | null;
+    counters: Record<string, number>;
+    association: 'matched' | 'different' | 'unverified';
+  };
+  system: {
+    available: boolean;
+    fresh: boolean;
+    status_raw: string | null;
+    status_tokens: string[];
+    notices: { code: string; label: string; level: 'info' | 'warning' }[];
+    alarm_text: string | null;
+    thresholds: { charge_low: number | null; runtime_low_sec: number | null };
+    runtime: { raw: string | null; seconds: number | null; quality: 'unavailable' | 'unverified' | 'sentinel' | 'stale' | 'invalid'; label: string };
+    values: Record<string, string>;
+  };
+  observation: {
+    schema: 1;
+    window_sec: number;
+    max_samples: number;
+    count: number;
+    points: RawObservationPoint[];
+    started_at: number | null;
+    first_timestamp: number | null;
+    last_timestamp: number | null;
+    truncated: boolean;
+    gap_count: number;
+    conflict_count: number;
+    rejected_count: number;
+    latest: {
+      fresh: boolean;
+      observed: boolean;
+      timestamp: number | null;
+      byte_26: number | null;
+      byte_27: number | null;
+      byte_28: number | null;
+      source: string | null;
+      mode: string | null;
+      device_alias: string | null;
+    };
+  };
+};
