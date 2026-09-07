@@ -66,7 +66,7 @@ cd /volume1/docker/ugreen-ups-panel &&
 sudo sh scripts/install-collector.sh
 ```
 
-出现 `Fresh UPS telemetry verified.` 表示安装成功。脚本会自动安装并启用采集器、准备 `data` 目录，无需手动修改权限；原有 UPS 服务保持运行。
+出现 `Fresh UPS telemetry verified.` 表示安装成功。脚本会自动安装并启用采集器、准备 `data` 目录；原有 UPS 服务保持运行。
 
 ### 3. 创建 Docker 项目
 
@@ -80,6 +80,7 @@ sudo sh scripts/install-collector.sh
 services:
   panel:
     image: bsakuramiku/ugreen-ups-panel:latest
+    user: "0:0" # 兼容部分 NAS 的 data 目录权限；非 root 运行方式见下文
     restart: unless-stopped # NAS 重启后自动启动，手动停止后保持停止
     ports:
       - "9086:8080" # 访问 NAS_IP:9086；更换访问端口只改左侧
@@ -89,6 +90,8 @@ services:
       # 历史数据库保存在当前目录，更新容器时保留
       - ./data:/data
 ```
+
+示例使用 `user: "0:0"` 兼容部分 NAS 数据目录的写入权限；原因、权限影响及非 root 替代步骤见[容器用户与数据目录权限](#容器用户与数据目录权限)。
 
 勾选【创建完成后立即运行】，点击【立即部署】，等待镜像下载并启动。
 
@@ -138,6 +141,57 @@ services:
 - 容器只读访问宿主机采集快照；采集器与原有 UPS 服务同时运行。
 
 数据流、历史存储和备份细节见[架构文档](docs/architecture.md)。
+
+<a id="non-root"></a>
+
+## 容器用户与数据目录权限
+
+默认 Compose 在 `panel` 下设置 `user: "0:0"`，让面板以容器内的 root 用户运行，用于兼容部分 NAS 绑定 `data` 目录及已有 SQLite 文件的权限。目录或文件不可写时，面板可能报 SQLite 无法打开数据库或只读错误；面板功能本身不依赖 root，默认 root 处理的是实际数据目录的写入权限。
+
+镜像自身仍默认使用 `10001:10001`；Compose 的 [`user`](https://docs.docker.com/reference/compose-file/services/#user) 只覆盖面板容器的运行用户。面板仍只读挂载采集快照，无需 `privileged`、USB 设备映射或挂载 `docker.sock`。root 对可写挂载文件有更大的修改权限，配置不当可能影响宿主机上的文件和其他服务，不能视为绝对安全；不要扩大挂载范围。参见 [Docker 绑定挂载说明](https://docs.docker.com/engine/storage/bind-mounts/#considerations-and-constraints)和[安全说明](SECURITY.md)。
+
+本节所有 Compose 命令都须沿用原部署的项目名。如果曾通过 UGOS 界面或 `-p` 指定了与目录名不同的名称，请统一使用 `sudo docker compose -p 原项目名 ...`，包括 `config`、`stop` 和 `up`，确保检查、停止和重建的是原面板。
+
+已有部署要采用这一默认值，需要在当前实际使用的 Compose 文件中给 `panel` 添加 `user: "0:0"`，然后在该项目目录执行 `sudo docker compose up -d --force-recreate panel`。单纯拉取镜像或重启旧容器不会更改容器用户。
+
+也可以选择非 root 运行。**先核对当前实际数据目录，保留并备份已有数据**，不要新建空目录来代替原数据库。在当前项目目录运行：
+
+```sh
+cd /volume1/docker/ugreen-ups-panel
+sudo docker compose config
+```
+
+将示例路径改为自己的部署路径，检查输出中 `target: /data` 对应的 `source`。`./data` 相对于 Compose 文件所在目录解析，必须与下面的 `ups_panel_data_dir` 指向同一实际目录；使用自定义挂载路径时相应修改。然后把现有 Compose 中 `panel` 的 `user` 改为 `"10001:10001"`，或删除 `user` 覆盖以使用镜像默认用户。
+
+接着停止面板，仅调整该数据目录及四个已知文件，再重建面板。命令会先核对目录与四个已存在文件的类型：拒绝符号链接，文件必须是普通文件；预检通过后才停止面板和调整权限。遇到链接或类型不符时，先核对实际目标路径。文件不存在时跳过，不删除数据库、WAL 或校准配置。
+
+```sh
+(
+  set -eu
+  cd /volume1/docker/ugreen-ups-panel
+  ups_panel_data_dir=/volume1/docker/ugreen-ups-panel/data
+  sudo test -d "$ups_panel_data_dir"
+  sudo test ! -L "$ups_panel_data_dir"
+  for ups_panel_file in history.sqlite history.sqlite-wal history.sqlite-shm calibration.json; do
+    sudo test ! -L "$ups_panel_data_dir/$ups_panel_file"
+    if sudo test -e "$ups_panel_data_dir/$ups_panel_file"; then
+      sudo test -f "$ups_panel_data_dir/$ups_panel_file"
+    fi
+  done
+  sudo docker compose stop panel
+  sudo chown 10001:10001 "$ups_panel_data_dir"
+  sudo chmod 0750 "$ups_panel_data_dir"
+  for ups_panel_file in history.sqlite history.sqlite-wal history.sqlite-shm calibration.json; do
+    if sudo test -f "$ups_panel_data_dir/$ups_panel_file"; then
+      sudo chown 10001:10001 "$ups_panel_data_dir/$ups_panel_file"
+      sudo chmod 0640 "$ups_panel_data_dir/$ups_panel_file"
+    fi
+  done
+  sudo docker compose up -d --force-recreate panel
+)
+```
+
+目录设置为 `0750`，已有 `history.sqlite`、`history.sqlite-wal`、`history.sqlite-shm` 和 `calibration.json` 设置为 `0640`，所有者均为 `10001:10001`。不使用 `chmod 777`，也不要对 NAS 共享目录递归执行 `chown` 或 `chmod`。如果 NAS 另有 ACL 限制，还需确保该 UID/GID 可访问实际数据目录；这套权限调整不替代 ACL 配置。
 
 ## 没有数据时
 

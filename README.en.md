@@ -50,6 +50,8 @@ sudo sh scripts/install-collector.sh && docker compose up -d
 
 The installer sets up the host collector and prepares the data directory. Compose automatically pulls the [Docker Hub image](https://hub.docker.com/r/bsakuramiku/ugreen-ups-panel); no local build is required.
 
+The default [`docker-compose.yaml`](docker-compose.yaml) sets `panel.user` to `"0:0"` for compatibility with data-directory permissions on some NAS systems. See [container user and data-directory permissions](#container-user-and-data-directory-permissions) for the reason, implications, and non-root alternative.
+
 Open `http://NAS_IP:9086`, replacing `NAS_IP` with your NAS's LAN address.
 
 The collector runs automatically after installation. Upgrading to v0.6.0 requires both the collector and dashboard update described below.
@@ -94,6 +96,57 @@ The default remains `none`; `local-19v-v1` and `custom` are also available. The 
 - The container reads host snapshots through a read-only mount. The collector runs alongside the existing UPS service.
 
 See [architecture](docs/architecture.md) for data flow, history storage, and backup details.
+
+<a id="non-root"></a>
+
+## Container user and data-directory permissions
+
+The default Compose file sets `user: "0:0"` under `panel`, running the dashboard as root inside the container to accommodate bind-mounted `data` directories and existing SQLite files on some NAS systems. Unwritable directories or files can cause SQLite “unable to open database” or read-only errors; the dashboard itself does not require root, and this default addresses write access to the actual data directory.
+
+The image itself still defaults to `10001:10001`; Compose's [`user`](https://docs.docker.com/reference/compose-file/services/#user) overrides only the dashboard container's process user. Collector snapshots remain mounted read-only. The dashboard needs no `privileged` mode, USB device mapping, or `docker.sock` mount. Root has greater ability to modify writable mounted files, so a bad mount configuration can affect host files and other services. It is not an absolute safety guarantee; keep mounts narrowly scoped. See [Docker's bind-mount considerations](https://docs.docker.com/engine/storage/bind-mounts/#considerations-and-constraints) and [security notes](SECURITY.md).
+
+All Compose commands in this section must use the original deployment's project name. If the UGOS GUI or `-p` set a name different from the directory name, consistently use `sudo docker compose -p original-project-name ...`, including for `config`, `stop`, and `up`, so these operations target the original dashboard.
+
+To adopt this default in an existing deployment, add `user: "0:0"` under `panel` in the Compose file actually used by that deployment, then run `sudo docker compose up -d --force-recreate panel` from that project directory. Pulling an image or restarting the old container alone does not change its user.
+
+Running as non-root is an alternative. **Identify the actual current data directory and back up the existing data first**; do not replace the database with a new empty directory. From the existing project directory, run:
+
+```sh
+cd /volume1/docker/ugreen-ups-panel
+sudo docker compose config
+```
+
+Replace the example path with your deployment path and inspect the `source` for `target: /data`. Compose resolves `./data` relative to the Compose file's directory; it must refer to the same actual directory as `ups_panel_data_dir` below. Adjust that variable if you use a custom mount. Then change `panel`'s `user` in your existing Compose file to `"10001:10001"`, or remove the override to use the image's default user.
+
+Next, stop the dashboard, adjust only this directory and the four named files, and recreate the dashboard. Before stopping the dashboard or changing permissions, the commands check that the directory is not a symbolic link and each existing named file is a regular file without a symbolic link. If a check fails, verify the actual target and file type first. Missing files are skipped, and the database, WAL, and calibration configuration are preserved.
+
+```sh
+(
+  set -eu
+  cd /volume1/docker/ugreen-ups-panel
+  ups_panel_data_dir=/volume1/docker/ugreen-ups-panel/data
+  sudo test -d "$ups_panel_data_dir"
+  sudo test ! -L "$ups_panel_data_dir"
+  for ups_panel_file in history.sqlite history.sqlite-wal history.sqlite-shm calibration.json; do
+    sudo test ! -L "$ups_panel_data_dir/$ups_panel_file"
+    if sudo test -e "$ups_panel_data_dir/$ups_panel_file"; then
+      sudo test -f "$ups_panel_data_dir/$ups_panel_file"
+    fi
+  done
+  sudo docker compose stop panel
+  sudo chown 10001:10001 "$ups_panel_data_dir"
+  sudo chmod 0750 "$ups_panel_data_dir"
+  for ups_panel_file in history.sqlite history.sqlite-wal history.sqlite-shm calibration.json; do
+    if sudo test -f "$ups_panel_data_dir/$ups_panel_file"; then
+      sudo chown 10001:10001 "$ups_panel_data_dir/$ups_panel_file"
+      sudo chmod 0640 "$ups_panel_data_dir/$ups_panel_file"
+    fi
+  done
+  sudo docker compose up -d --force-recreate panel
+)
+```
+
+The directory gets mode `0750`; existing `history.sqlite`, `history.sqlite-wal`, `history.sqlite-shm`, and `calibration.json` get `0640`. All are owned by `10001:10001`. Do not use `chmod 777` or recursively change ownership or permissions across a NAS shared folder. If NAS ACLs impose additional restrictions, ensure this UID/GID can access the actual data directory; these mode changes do not replace ACL configuration.
 
 ## If there is no data
 

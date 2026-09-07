@@ -1,6 +1,7 @@
 services:
   panel:
     image: bsakuramiku/ugreen-ups-panel:latest
+    user: "0:0" # 兼容部分 NAS 的 data 目录权限；非 root 方案见 README
     restart: unless-stopped # NAS 重启后自动启动，手动停止后保持停止
     ports:
       - "9086:8080" # 访问 NAS_IP:9086；更换访问端口只改左侧

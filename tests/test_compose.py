@@ -45,6 +45,7 @@ def test_production_compose_uses_prebuilt_image_and_protected_bind_mounts(tmp_pa
     configuration = compose_config(tmp_path, [])
     panel = configuration['services']['panel']
     assert panel['image'] == 'bsakuramiku/ugreen-ups-panel:latest'
+    assert panel['user'] == '0:0'
     assert 'build' not in panel
     assert configuration['name'] == tmp_path.name
     assert panel['ports'][0].get('host_ip', '0.0.0.0') == '0.0.0.0'

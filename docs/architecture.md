@@ -61,9 +61,9 @@ flowchart LR
 
 ## Web 与历史
 
-FastAPI 同时提供本地静态资源、遥测读取 API 和校准配置 API。容器没有 USB 设备挂载，也不需要 root；只读挂载快照目录，在可写的 `/data` 中保存数据库和校准配置。Compose 将 `/data` 映射到部署目录中的 `./data`；宿主机采集器仅从中读取校准文件。
+FastAPI 同时提供本地静态资源、遥测读取 API 和校准配置 API。容器只读挂载快照目录，在可写的 `/data` 中保存数据库和校准配置。Compose 将 `/data` 映射到部署目录中的 `./data`；宿主机采集器仅从中读取校准文件。镜像默认用户为 `10001:10001`，仓库 Compose 则以 `user: "0:0"` 兼容部分 NAS 的绑定目录权限。它没有 USB 设备挂载，也没有开启 `privileged`；面板的功能不依赖 root，可按 [非 root 方案](../README.md#non-root)准备权限后使用普通用户运行。
 
-Compose 自动读取 `docker-compose.yaml`。顶层 `name` 是可选参数，默认配置不设置；没有通过 `-p` 或 `COMPOSE_PROJECT_NAME` 指定项目名时，项目名来自部署目录名称，README 的默认部署目录为 `ugreen-ups-panel`。已有部署应保持相同目录名称，或显式沿用原项目名，避免新建另一组容器。采集器安装脚本自动创建项目 `data/`，设置 UID/GID `10001:10001` 和目录权限 `0750`，保留已有数据库与校准配置；用户无需手动处理目录权限。首次安装默认使用源码目录下的 `data/`；从临时源码目录升级时，以 `--data-dir /实际部署路径/data` 明确沿用原数据目录。先运行安装脚本，再启动 Compose。面板直接读取镜像默认的快照与数据库路径，不需要额外的路径环境变量。
+Compose 自动读取 `docker-compose.yaml`。顶层 `name` 是可选参数，默认配置不设置；没有通过 `-p` 或 `COMPOSE_PROJECT_NAME` 指定项目名时，项目名来自部署目录名称，README 的默认部署目录为 `ugreen-ups-panel`。已有部署应保持相同目录名称，或显式沿用原项目名，避免新建另一组容器。采集器安装脚本自动创建项目 `data/`，设置目录 UID/GID `10001:10001` 和权限 `0750`，保留已有数据库与校准配置，不会递归改写已有文件的权限。因此，Docker 项目的实际挂载目录必须与安装时准备的目录一致；从 root 切回普通用户时，还需检查已有数据库、WAL/SHM 和校准文件的所有者。首次安装默认使用源码目录下的 `data/`；从临时源码目录升级时，以 `--data-dir /实际部署路径/data` 明确沿用原数据目录。先运行安装脚本，再启动 Compose。面板直接读取镜像默认的快照与数据库路径，不需要额外的路径环境变量。
 
 | 接口 | 用途 |
 | --- | --- |
@@ -127,11 +127,17 @@ v0.5.0 从数据库中仍保留的 60 秒历史补建日统计，再持续记录
 历史保存在项目 `data/history.sqlite`，校准保存在 `data/calibration.json`；更新或重建容器不会删除它们。已有校准文件时，备份时一并复制该文件。历史数据库的在线备份使用 SQLite 备份接口，避免遗漏尚在 WAL 文件中的已提交记录：
 
 ```sh
-docker compose exec -T panel python -c "import sqlite3; s=sqlite3.connect('/data/history.sqlite'); d=sqlite3.connect('/data/backup.sqlite'); s.backup(d); d.close(); s.close()"
-docker compose cp panel:/data/backup.sqlite ./backup.sqlite
+(
+  set -eu
+  ups_panel_backup_path="$(docker compose exec -T panel python -c "import os, sqlite3, tempfile; s=sqlite3.connect('file:/data/history.sqlite?mode=ro', uri=True); fd, p=tempfile.mkstemp(prefix='ups-panel-backup-', suffix='.sqlite', dir='/tmp'); os.close(fd); d=sqlite3.connect(p); s.backup(d); d.close(); s.close(); print(p)")"
+  docker compose cp "panel:$ups_panel_backup_path" ./
+  docker compose exec -T panel rm -- "$ups_panel_backup_path"
+)
 ```
 
-恢复备份时先停止 `panel`，保留当前数据库副本，再替换 `data/history.sqlite`，移走对应旧 WAL/SHM 文件并确认数据库属于 `10001:10001` 后启动。不同版本间恢复前需核对数据库兼容性，不能在面板仍写入时替换数据库。
+备份复制到当前目录中的独立 `ups-panel-backup-*.sqlite` 文件。容器内临时文件位于 `/tmp`，成功复制后删除，避免在 `data` 内留下切换用户后无法覆盖的固定备份文件。上述命令也应沿用原 Compose 项目名。
+
+恢复备份时先停止 `panel`，保留当前数据库副本，再替换 `data/history.sqlite`，移走对应旧 WAL/SHM 文件并确认目录与数据库允许所选容器用户写入后启动。使用非 root 方案时，目录和相关文件应属于 `10001:10001`。不同版本间恢复前需核对数据库兼容性，不能在面板仍写入时替换数据库。
 
 回滚到旧采集器时，schema 2 校准文件也需要恢复为适用的兼容 schema 1 配置或 `none`。先备份当前配置，再按[校准回滚说明](calibration.md#升级与回滚)处理；保留已有历史，不通过删除数据库解决配置版本问题。
 
