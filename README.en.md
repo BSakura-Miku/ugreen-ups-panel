@@ -18,13 +18,17 @@ A UGREEN US3000 dashboard for power state, battery charge, cell voltages, and hi
 - Charge percentage, input/output voltage, pack voltage, four cell voltages, and cell voltage difference.
 - Up to one year of history, power and connection events, and CSV export with averages and extrema.
 - Mean and peak cell voltage difference, with the actual dates covered by recorded data.
+- Reference cell-voltage-difference levels after stable standby, with recent low-cell observations and guidance.
 - Individual battery-power records with start/end times, observed duration, start/end charge, occurrence counts, and net charge decrease.
+- Estimated discharge energy in Wh within observed intervals, with coverage and power provenance.
 - A step-by-step assistant using manually entered AC readings, with confirmed 12/19/20 V adapter input and editable coefficients.
 - Hardware references, NUT status, and capture diagnostics.
 
 Trend ranges include 1 hour, 24 hours, 7 days, 30 days, 90 days, half a year (180 days), and one year (365 days). Ranges longer than 90 days use daily aggregates. Charts keep the entire selected time range, leaving unrecorded periods and gaps empty; a few days of data remain a few days of data.
 
 Battery-power records begin with valid sampling after first enabling v0.5.0 or later; older events and aggregates are not converted into session details. The default range is 90 days, with choices from 7 days to one year. Missing transitions or interrupted capture produce incomplete records. Net charge decrease is measured in percentage points and may be negative when charge readings rise; it is not energy in Wh or a battery cycle count.
+
+In v0.7.0, reference levels require 30 minutes of continuous standby and 2 minutes in the current voltage-difference band. These are project guidance, not manufacturer health limits. Estimated discharge energy starts with valid samples observed by the new version and requires a configured battery gain; older records are not backfilled. Neither feature reports full battery capacity or SOH. See [battery observations](docs/battery-observation.md).
 
 Power fields still have protocol and measurement-location limitations. The optional empirical model is disabled by default (calibration profile `none`), so coefficients from the development unit are not applied. See [power calibration](docs/calibration.md).
 
@@ -54,11 +58,18 @@ The default [`docker-compose.yaml`](docker-compose.yaml) sets `panel.user` to `"
 
 Open `http://NAS_IP:9086`, replacing `NAS_IP` with your NAS's LAN address.
 
-The collector runs automatically after installation. Upgrading to v0.6.0 requires both the collector and dashboard update described below.
+Successful installation starts the collector and enables it at boot.
 
 ## Update
 
-**For v0.6.0, update the host collector first, then the dashboard container** to use the calibration assistant and voltage settings. Follow the [backup instructions](docs/architecture.md#备份与维护) for the database and calibration file before updating. Replace `/volume1/docker/ugreen-ups-panel` below with your existing project path. Temporary source files are removed afterward; your existing `data` and `docker-compose.yaml` are retained.
+**With a v0.6.0 collector already installed, v0.7.0 only needs a dashboard update.** Follow the [backup instructions](docs/architecture.md#备份与维护) first. Replace the paths below with your existing deployment path and keep the original Compose project name; add `-p original-project-name` consistently if you previously set a custom name.
+
+```sh
+sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml pull
+sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml up -d
+```
+
+For a collector older than v0.6.0, use the compatibility upgrade below to update the collector before the dashboard, providing the calibration assistant and complete power provenance. Temporary source files are removed afterward; existing `data` and `docker-compose.yaml` are retained.
 
 ```sh
 (

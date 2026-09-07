@@ -3,6 +3,7 @@ import json
 from uuid import uuid4
 
 from .power import finite_number
+from .battery_energy import BatteryEnergy, context_changed, evidence, render as render_energy
 
 MAX_GAP_SEC = 10
 STATE_KEY = 'battery_sessions_state'
@@ -40,14 +41,18 @@ class BatterySessions:
             else:
                 self.state['active_id'] = None
                 self.state['last_mode'] = None
+        self.energy = BatteryEnergy(db)
+        self._energy_continuity = self.energy.restore(db, self.active, self.state)
 
-    def interrupt(self, reason):
+    def interrupt(self, reason, energy_reason=None):
+        self.energy.close(energy_reason, self.active if energy_reason == 'continuity_lost' else None)
         if self.active is not None:
             self.active['end_reason'] = reason
             self.pending[self.active['id']] = dict(self.active)
             self.active = None
             self.state['active_id'] = None
         self.state['last_mode'] = None
+        self._energy_continuity = True
 
     def ingest(self, view):
         if not view.get('fresh') or not isinstance(view.get('sample'), dict):
@@ -61,9 +66,13 @@ class BatterySessions:
         previous_ts = self.state['last_ts']
         # A stale duplicate must not create a transition or revive continuity.
         if previous_ts is not None and ts <= previous_ts:
+            if ts < previous_ts:
+                self.energy.break_anchor('timestamp_rollback')
             return
         if self.state['recording_since'] is None:
             self.state['recording_since'] = ts
+        if self.active is not None and not self._energy_continuity:
+            self.interrupt('context_changed', 'continuity_lost')
         if previous_ts is not None and ts - previous_ts > MAX_GAP_SEC:
             self.interrupt('gap')
         previous_mode = self.state['last_mode']
@@ -72,6 +81,10 @@ class BatterySessions:
         if mode not in ('battery', 'online', 'charging'):
             self.interrupt('unknown')
             return
+        identity, basis, energy_reason = evidence(view)
+        if self.energy.active is not None and context_changed(self.energy.active['identity'], identity):
+            self.interrupt('context_changed', 'context_changed')
+            previous_mode = None
         if mode == 'battery':
             if self.active is None:
                 self.active = {
@@ -80,13 +93,16 @@ class BatterySessions:
                     'start_known': previous_mode in ('online', 'charging'),
                     'end_reason': None, 'sample_count': 1}
                 self.state['active_id'] = self.active['id']
+                self.energy.start(self.active, view, identity, basis, energy_reason)
             else:
                 self.active.update(last_ts=ts, end_soc=soc(sample),
                                    sample_count=self.active['sample_count'] + 1)
+                self.energy.ingest(self.active, view, identity, basis, energy_reason)
             self.pending[self.active['id']] = dict(self.active)
         elif self.active is not None:
             self.active.update(end_ts=ts, end_soc=soc(sample), end_reason='external')
             self.pending[self.active['id']] = dict(self.active)
+            self.energy.close()
             self.active = None
             self.state['active_id'] = None
         self.state['last_mode'] = mode
@@ -96,14 +112,17 @@ class BatterySessions:
             db.execute('INSERT OR REPLACE INTO battery_sessions VALUES(?,?,?,?,?,?,?,?,?)',
                        tuple(record[key] for key in FIELDS))
         db.execute('INSERT OR REPLACE INTO meta VALUES(?,?)', (STATE_KEY, json.dumps(self.state)))
+        self.energy.write(db)
 
     def committed(self):
         self.pending.clear()
+        self.energy.committed()
 
     @staticmethod
     def prune(db, now):
         db.execute('''DELETE FROM battery_sessions WHERE end_reason IS NOT NULL
                       AND COALESCE(end_ts,last_ts) < ?''', (now - 365 * 86400,))
+        BatteryEnergy.prune(db)
 
     def history(self, db, days, limit, now, capture_fresh):
         start = now - days * 86400
@@ -111,6 +130,7 @@ class BatterySessions:
                              WHERE COALESCE(end_ts,last_ts)>=? AND start_ts<=?''', (start, now))
         records = {row[0]: dict(zip(FIELDS, row)) for row in rows}
         records.update({key: dict(value) for key, value in self.pending.items()})
+        energies = self.energy.history(db, start, now)
         result = []
         summary = {'confirmed_starts': 0, 'complete_count': 0, 'incomplete_count': 0,
                    'ongoing_count': 0, 'observed_duration_sec': 0,
@@ -132,6 +152,7 @@ class BatterySessions:
             item['soc_drop_pp'] = (round(item['start_soc'] - item['end_soc'], 4)
                                    if item['start_soc'] is not None and item['end_soc'] is not None else None)
             item['overlaps_boundary'] = item['start_ts'] < start or end > now
+            item['energy'] = render_energy(energies.get(item['id']), item)
             summary[item['status'] + '_count'] += 1
             if item['start_known'] and start <= item['start_ts'] <= now:
                 summary['confirmed_starts'] += 1

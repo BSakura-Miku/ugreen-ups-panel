@@ -190,6 +190,12 @@ assert live['sample']['calibration_profile'] == 'none'
 assert live['sample']['ac_input_estimate_w'] is None and live['sample']['battery_energy_estimate_w'] is None
 assert live['sample']['ac_estimate_quality'] == 'not_configured'
 assert live_headers.get('cache-control') == 'no-store', 'Live responses must disable caching'
+balance = live['cell_balance']
+assert balance['schema'] == 1 and balance['reference_only'] is True, 'Cell-balance API contract missing'
+assert balance['required_standby_sec'] == 1800 and balance['persistence_sec'] == 120
+assert balance['thresholds'] == {'good_below_mv': 20, 'minor_below_mv': 50, 'elevated_below_mv': 100}
+assert balance['state'] in ('observing', 'settling') and balance['level'] is None
+assert balance['delta_mv'] == 2 and balance['lowest_cells'] == [3]
 
 # Check the actual image's default estimator as well as the fixture/API contract.
 from ups_panel.power import PowerEstimator
@@ -267,6 +273,91 @@ def check_v2_calibration(directory):
 
 calibration_checks = check_v2_calibration('/data')
 
+def check_battery_observation(directory):
+    # Use the installed estimator, store and monitor on disposable synthetic data.
+    # Advancing sample timestamps tests the real 30-minute default without sleeping
+    # or changing any production thresholds, collector configuration or API data.
+    import math
+    from pathlib import Path
+    import tempfile
+    from ups_panel.calibration import normalize_config
+    from ups_panel.cell_balance import CellBalanceMonitor
+    from ups_panel.power import PowerEstimator
+    from ups_panel.storage import Store
+
+    config = normalize_config({'schema': 2, 'profile': 'custom', 'ac_voltage_nominal_v': 12,
+                               'coefficients': {'base_gain': 1, 'charge_gain': None, 'battery_gain': 2}})
+    estimator = PowerEstimator(config=config)
+
+    def fixture(timestamp, mode='online', power=None, soc=90, cells=None):
+        cells = [4.1, 4.11, 4.11, 4.11] if cells is None else cells
+        raw = {'timestamp': timestamp, 'mode': mode, 'soc': soc, 'cells': cells,
+               'battery_voltage': sum(cells), 'input_voltage': 12, 'adapter_input_voltage_v': 12,
+               'decoder_version': 4, 'formula_version': 2, 'raw_fields': {'byte_28': 50},
+               'battery_discharge_power_candidate_w': power if mode == 'battery' else None,
+               'battery_charge_power_candidate_w': 8 if mode == 'charging' else None}
+        return {'fresh': True, 'source': 'replay',
+                'device': {'serial': 'SMOKE-OBSERVATION', 'bus': 1, 'device': 2, 'path': 'synthetic'},
+                'sample': estimator.update(raw)}
+
+    with tempfile.TemporaryDirectory(prefix='.smoke-observation-', dir=directory) as temporary:
+        path = Path(temporary) / 'history.sqlite'
+        store = Store(path)
+        for timestamp, mode, power, soc in ((98, 'online', None, 90), (100, 'battery', 10, 90),
+                                            (102, 'battery', 20, 89), (105, 'battery', 40, 88),
+                                            (106, 'charging', None, 92)):
+            item = fixture(timestamp, mode, power, soc)
+            if mode == 'battery':
+                assert item['sample']['battery_energy_estimate_w'] is None, 'Unexpected smoothing warm-up'
+            store.ingest(item, now=timestamp)
+        store.flush()
+        with store.connect() as db:
+            columns = [row[1] for row in db.execute('PRAGMA table_info(battery_sessions)')]
+            assert columns == ['id', 'start_ts', 'end_ts', 'last_ts', 'start_soc', 'end_soc',
+                               'start_known', 'end_reason', 'sample_count'], 'Legacy session schema changed'
+            assert db.execute('PRAGMA user_version').fetchone()[0] == 2
+            assert db.execute('SELECT COUNT(*) FROM battery_session_energy').fetchone()[0] == 1
+            # Older panels still write nine columns and do not invent energy rows.
+            db.execute('INSERT INTO battery_sessions VALUES(?,?,?,?,?,?,?,?,?)',
+                       ('smoke-legacy', 80, 84, 82, 95, 94, 1, 'external', 2))
+        restored = Store(path).battery_history(1, now=107)
+        assert len(restored['records']) == 2
+        legacy = next(row for row in restored['records'] if row['id'] == 'smoke-legacy')
+        assert legacy['energy'] is None, 'Old records unexpectedly acquired energy estimates'
+        record = next(row for row in restored['records'] if row['id'] != 'smoke-legacy')
+        energy = record['energy']
+        assert record['status'] == 'complete' and record['observed_duration_sec'] == 6
+        assert energy['schema'] == 1 and energy['status'] == 'available' and energy['reasons'] == []
+        # 20 -> 40 W for 2 seconds, then 40 -> 80 W for 3 seconds = 240 W.s.
+        assert math.isclose(energy['estimate_wh'], 240 / 3600, rel_tol=1e-12), 'Energy trapezoids are incorrect'
+        assert energy['covered_duration_sec'] == energy['observed_duration_sec'] == 5
+        assert energy['interval_count'] == 2 and energy['coverage_ratio'] == 1
+        assert energy['start_soc'] == 90 and energy['end_soc'] == 88 and record['end_soc'] == 92
+        assert energy['basis']['revision'] == config['revision'] and energy['basis']['battery_gain'] == 2
+        assert energy['basis']['source'] == 'replay' and energy['basis']['device']['serial'] == 'SMOKE-OBSERVATION'
+
+    monitor = CellBalanceMonitor()
+    for timestamp in range(0, 1801, 5):
+        observed = fixture(timestamp)
+        monitor.ingest(observed)
+    assessed = monitor.snapshot(observed)
+    assert assessed['state'] == 'assessed' and assessed['level'] == 'good'
+    assert assessed['standby_duration_sec'] == 1800 and assessed['reference_only'] is True
+    assert assessed['delta_mv'] == 10 and assessed['recent_sample_count'] == 361
+    hidden = monitor.snapshot(dict(observed, fresh=False))
+    assert hidden['state'] == 'unavailable' and hidden['reason'] == 'no_fresh_sample'
+    assert hidden['level'] is hidden['delta_mv'] is None and not hidden['observed']
+    assert monitor.snapshot(observed) == assessed, 'Snapshot read mutated the monitor'
+    charging = fixture(1805, mode='charging', cells=[4.0, 4.1, 4.1, 4.1])
+    monitor.ingest(charging)
+    charging_balance = monitor.snapshot(charging)
+    assert charging_balance['state'] == 'charging' and charging_balance['delta_mv'] == 100
+    assert charging_balance['level'] is charging_balance['candidate_level'] is None
+    assert charging_balance['standby_duration_sec'] == charging_balance['recent_sample_count'] == 0
+    return {'battery_energy': 'passed', 'cell_balance': 'passed'}
+
+observation_checks = check_battery_observation('/data')
+
 class Assets(HTMLParser):
     def __init__(self):
         super().__init__()
@@ -336,7 +427,7 @@ else:
 print(json.dumps({'uid': os.getuid(), 'machine': platform.machine(),
                   'assets': len(assets.paths), 'sqlite_rows': rows,
                   'history_points': len(history['points']), 'csv_rows': len(csv_rows),
-                  'calibration_profile': 'none', **calibration_checks, 'checks': 'passed'}))
+                  'calibration_profile': 'none', **calibration_checks, **observation_checks, 'checks': 'passed'}))
 '''
 
 
@@ -415,12 +506,16 @@ def run(image: str, platform: str | None):
                 "import json,urllib.request; o=urllib.request.build_opener(urllib.request.ProxyHandler({})); "
                 "v=json.load(o.open('http://127.0.0.1:8080/api/live',timeout=3)); "
                 "h=json.load(o.open('http://127.0.0.1:8080/api/health',timeout=3)); "
-                "assert not v['fresh'] and not h['capture_fresh']; print('stale capture hidden')")
+                "assert not v['fresh'] and not h['capture_fresh']; b=v['cell_balance']; "
+                "assert b['state']=='unavailable' and b['reason']=='no_fresh_sample'; "
+                "assert b['level'] is None and b['delta_mv'] is None and not b['observed']; "
+                "assert b['recent_sample_count']==0 and b['sample_timestamp'] is None; "
+                "print('stale capture and cell grade hidden')")
             report.update(image=image, image_id=metadata['Id'],
                           platform=platform or 'linux/' + {
                               'x86_64': 'amd64', 'aarch64': 'arm64',
                           }.get(report['machine'], metadata['Architecture']),
-                          stale_capture='passed')
+                          stale_capture='passed', stale_cell_balance='passed')
             print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
         except BaseException:
             if attempted:

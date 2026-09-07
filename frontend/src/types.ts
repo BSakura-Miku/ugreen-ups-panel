@@ -38,13 +38,61 @@ export type BatterySession = {
   start_soc: number | null;
   end_soc: number | null;
   start_known: boolean;
-  end_reason: 'external' | 'offline' | 'gap' | 'unknown' | null;
+  end_reason: 'external' | 'offline' | 'gap' | 'unknown' | 'context_changed' | null;
   sample_count: number;
   status: 'complete' | 'incomplete' | 'ongoing';
   observed_duration_sec: number;
   duration_sec: number | null;
   soc_drop_pp: number | null;
   overlaps_boundary: boolean;
+  energy?: BatterySessionEnergy | null;
+};
+
+export type BatteryEnergyBasis = {
+  profile: string | null;
+  revision: string | null;
+  battery_gain: number | null;
+  estimate_basis: string | null;
+  source: string | null;
+  device: Record<string, unknown> | null;
+  decoder_version: number | string | null;
+  formula_version: number | string | null;
+};
+export type BatterySessionEnergy = {
+  schema: 1;
+  estimate_wh: number | null;
+  covered_duration_sec: number;
+  observed_duration_sec: number;
+  coverage_ratio: number | null;
+  interval_count: number;
+  status: 'available' | 'partial' | 'unavailable';
+  reasons: string[];
+  basis: BatteryEnergyBasis | null;
+  start_soc: number | null;
+  end_soc: number | null;
+};
+
+export type CellBalanceLevel = 'good' | 'minor' | 'elevated' | 'check';
+export type CellBalanceReport = {
+  schema: 1;
+  state: 'unavailable' | 'charging' | 'discharging' | 'settling' | 'observing' | 'assessed';
+  level: CellBalanceLevel | null;
+  candidate_level: CellBalanceLevel | null;
+  delta_mv: number | null;
+  standby_duration_sec: number;
+  required_standby_sec: number;
+  persistence_sec: number;
+  candidate_duration_sec: number;
+  lowest_cells: number[];
+  frequent_lowest_cell: number | null;
+  recent_max_delta_mv: number | null;
+  recent_window_sec: number;
+  recent_sample_count: number;
+  sample_timestamp: number | null;
+  observed: boolean;
+  reason: 'no_fresh_sample' | 'invalid_sample' | 'not_observed' | 'waiting_standby' | 'confirming_level' | null;
+  thresholds: { good_below_mv: number; minor_below_mv: number; elevated_below_mv: number };
+  reference_only: true;
 };
 
 export type BatterySessions = {
@@ -130,6 +178,7 @@ export type Sample = {
   raw_fields?: { be_u16: Record<string, number>; byte_26?: number; byte_27?: number; byte_28: number; frame_hex: string };
 };
 export type LiveView = {
+  cell_balance?: CellBalanceReport | null;
   calibration?: { config: CalibrationConfig | null; configurable: boolean; error: string | null };
   fresh: boolean;
   source: string;

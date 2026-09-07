@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .storage import CONTEXT_FIELDS, Store, METRICS
 from .power import finite_number
+from .cell_balance import CellBalanceMonitor
 from .calibration import (CalibrationError, DEFAULT_COEFFICIENTS, default_config,
                           load_config, normalize_config, save_config)
 
@@ -95,14 +96,27 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
     static = Path(static or os.getenv('UPS_STATIC', 'frontend/dist'))
     calibration = Path(calibration or os.getenv('UPS_CALIBRATION_CONFIG') or Path(database).with_name('calibration.json'))
     calibration_lock = asyncio.Lock()
-    state = {'store': None, 'storage_error': None, 'last_success': 0}
+    state = {'store': None, 'storage_error': None, 'last_success': 0,
+             'observation_ready': asyncio.Event()}
+    cell_balance = CellBalanceMonitor()
+
+    async def observe_cells():
+        while True:
+            # Disk writes can wait on SQLite locks; voltage observation must
+            # keep its own cadence. HTTP reads never advance this clock.
+            cell_balance.ingest(load_snapshot(snapshot))
+            ready = state['observation_ready']
+            state['observation_ready'] = asyncio.Event()
+            ready.set()
+            await asyncio.sleep(0.5)
 
     async def record():
         while True:
+            view = load_snapshot(snapshot)
             try:
                 if state['store'] is None:
                     state['store'] = await asyncio.to_thread(Store, database)
-                await asyncio.to_thread(state['store'].ingest, load_snapshot(snapshot))
+                await asyncio.to_thread(state['store'].ingest, view)
                 state['storage_error'] = None
                 state['last_success'] = time.time()
             except (OSError, sqlite3.Error, ValueError, TypeError, KeyError) as exc:
@@ -112,18 +126,18 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
 
     @asynccontextmanager
     async def lifespan(app):
-        task = asyncio.create_task(record())
-        yield
-        task.cancel()
+        tasks = [asyncio.create_task(observe_cells()), asyncio.create_task(record())]
         try:
-            await task
-        except asyncio.CancelledError:
-            pass
-        if state['store']:
-            try:
-                await asyncio.to_thread(state['store'].flush)
-            except (OSError, sqlite3.Error):
-                LOG.exception('History flush failed')
+            yield
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            if state['store']:
+                try:
+                    await asyncio.to_thread(state['store'].flush)
+                except (OSError, sqlite3.Error):
+                    LOG.exception('History flush failed')
 
     app = FastAPI(title='US3000 监控面板', lifespan=lifespan, docs_url=None, redoc_url=None)
 
@@ -138,8 +152,19 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
         return response
 
     @app.get('/api/live')
-    def live():
+    async def live():
         view = load_snapshot(snapshot)
+        view['cell_balance'] = cell_balance.snapshot(view)
+        if view['fresh'] and view['cell_balance']['reason'] == 'not_observed':
+            # A GET can land just after the collector replaces latest.json.
+            # Wait for the independent observer rather than count the request
+            # as telemetry or display a grade from a different sample.
+            try:
+                await asyncio.wait_for(state['observation_ready'].wait(), timeout=0.75)
+            except asyncio.TimeoutError:
+                pass
+            view = load_snapshot(snapshot)
+            view['cell_balance'] = cell_balance.snapshot(view)
         view['storage_error'] = state['storage_error']
         view['storage_dropped_buckets'] = state['store'].dropped_buckets if state['store'] else 0
         nut = view.setdefault('nut', {})
