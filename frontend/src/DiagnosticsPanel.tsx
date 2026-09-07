@@ -27,7 +27,7 @@ class DiagnosticsBoundary extends React.Component<{ children: React.ReactNode },
 }
 
 function BuildValue({ build }: { build: DiagnosticBuild | null | undefined }) {
-  return <><span>{diagnosticVersion(build?.version)}</span>{build?.revision && <small>修订 {build.revision}</small>}{build?.source_sha256 && <details className="diag-details"><summary>源码指纹</summary><small>{build.source_sha256}</small></details>}</>;
+  return <><span>{diagnosticVersion(build?.version)}</span>{(build?.revision || build?.source_sha256) && <details className="diag-details build-details"><summary>构建详情</summary>{build.revision && <small>修订 {build.revision}</small>}{build.source_sha256 && <small>源码指纹 {build.source_sha256}</small>}</details>}</>;
 }
 
 function RawTrend({ points }: { points: RawObservationPoint[] }) {
@@ -161,7 +161,7 @@ function DiagnosticsContent() {
         <p className="diag-note">逐项显示已观测到的连接条件；检查通过不代表电池或设备健康。</p>
         {connection?.checks.length ? <ul className="diag-checks">{connection.checks.map((check, index) => {
           const status = responseFresh && check.status in checkLabels ? check.status : 'unknown';
-          return <li key={`${check.id}-${index}`}><div><strong>{check.label}</strong><span className={`diag-status diag-status-${status}`}>{checkLabels[status]}</span></div><p>{responseFresh ? check.detail : '等待更新诊断结果。'}</p></li>;
+          return <li key={`${check.id}-${index}`}><details className="diag-check-detail"><summary><strong>{check.label}</strong><span className={`diag-status diag-status-${status}`}>{checkLabels[status]}</span></summary><p>{responseFresh ? check.detail : '等待更新诊断结果。'}</p></details>{(status === 'warning' || status === 'error') && <p className="diag-check-warning">{check.detail}</p>}</li>;
         })}</ul> : <p className="diag-empty">等待采集器连接信息。</p>}
         <dl className="diag-values diag-connection-meta">
           <div><dt>USB 数据时间</dt><dd>{responseFresh && finite(connection?.usb_age_sec) ? elapsedLabel(connection.usb_age_sec + sinceResponse) : '未知'}</dd></div>

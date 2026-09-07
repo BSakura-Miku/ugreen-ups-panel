@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowDownToLine, ArrowUpRight, CheckCircle2, Eye, EyeOff, KeyRound, RefreshCw, RotateCcw, X } from 'lucide-react';
+import { AlertTriangle, ArrowDownToLine, ArrowUpRight, CheckCircle2, Eye, EyeOff, KeyRound, RefreshCw, RotateCcw, X } from 'lucide-react';
 import type { CollectorUpdateStatus, DiagnosticBuild } from './types';
 import { diagnosticTime, diagnosticVersion } from './diagnosticDisplay';
 import { COLLECTOR_UPDATE_DOCS, collectorAdminKeyReady, collectorOperationResult, collectorReleaseTarget, collectorReleaseUrl,
@@ -23,6 +23,7 @@ function CollectorUpdateContent({ fallbackCurrent }: { fallbackCurrent?: Diagnos
   const [readError, setReadError] = useState('');
   const [actionError, setActionError] = useState('');
   const [adminKey, setAdminKey] = useState('');
+  const [controlsOpen, setControlsOpen] = useState(false);
   const [keyVisible, setKeyVisible] = useState(false);
   const [intent, setIntent] = useState<Intent | null>(null);
   const [pending, setPending] = useState<CollectorUpdateAction | null>(null);
@@ -92,6 +93,11 @@ function CollectorUpdateContent({ fallbackCurrent }: { fallbackCurrent?: Diagnos
     : status?.availability === 'unreachable' ? '更新服务当前无法连接，请按说明检查 NAS 上的服务。'
     : status?.availability === 'incompatible' ? '更新服务与此面板不兼容，请按说明升级更新服务。' : '';
 
+  const controlsAvailable = status?.installed === true && status.availability === 'ready';
+  useEffect(() => {
+    if (!controlsAvailable) { setControlsOpen(false); setAdminKey(''); setKeyVisible(false); setIntent(null); }
+  }, [controlsAvailable]);
+
   async function submit(action: CollectorUpdateAction, reviewed?: Intent) {
     if (mutationLock.current || locked || !keyReady) return;
     let body: Record<string, unknown> = {};
@@ -152,7 +158,7 @@ function CollectorUpdateContent({ fallbackCurrent }: { fallbackCurrent?: Diagnos
     {!readError && status && !recent && <p className="update-feedback" role="status">更新状态尚未及时刷新，操作按钮已暂停。</p>}
 
     {(pending || operation) && <div className={`update-operation ${recoveryWarning ? 'update-operation-warning' : ''}`} role="status" aria-live="polite">
-      <strong>{pending ? pending === 'check' ? '正在提交检查请求' : pending === 'install' ? '正在提交安装请求' : '正在提交回退请求' : busy ? collectorStageLabel(operation?.stage) : collectorOperationResult(operation || null)}</strong>
+      <strong>{recoveryWarning && <AlertTriangle size={18}/>} {pending ? pending === 'check' ? '正在提交检查请求' : pending === 'install' ? '正在提交安装请求' : '正在提交回退请求' : busy ? collectorStageLabel(operation?.stage) : collectorOperationResult(operation || null)}</strong>
       {(pending || busy) && <progress aria-label="采集器操作正在进行"/>}
       {operation?.to_version && <p>目标版本 {operation.to_version}{operation.from_version ? ` · 原版本 ${operation.from_version}` : ''}</p>}
       {operation?.error && <p>{collectorUpdateError(operation.error.code)}</p>}
@@ -161,15 +167,16 @@ function CollectorUpdateContent({ fallbackCurrent }: { fallbackCurrent?: Diagnos
       {operation?.outcome === 'manual_required' && <a className="update-link" href={COLLECTOR_UPDATE_DOCS} target="_blank" rel="noreferrer">查看手动恢复说明 <ArrowUpRight size={14}/></a>}
     </div>}
 
-    {status?.installed && status.availability === 'ready' && <>
-      <div className="update-key-field"><label htmlFor="collector-update-admin-key"><KeyRound size={15}/>管理密钥</label><div className="update-key-input"><input id="collector-update-admin-key" type={keyVisible ? 'text' : 'password'} value={adminKey} autoComplete="off" autoCapitalize="none" spellCheck={false} maxLength={128} aria-describedby="collector-update-key-note" placeholder="手动粘贴 NAS 管理密钥" onChange={event => { setAdminKey(event.target.value); setActionError(''); }}/><button type="button" className="update-icon-button" aria-label={keyVisible ? '隐藏管理密钥' : '显示管理密钥'} aria-pressed={keyVisible} onClick={() => setKeyVisible(value => !value)}>{keyVisible ? <EyeOff size={17}/> : <Eye size={17}/>}</button><button type="button" className="update-icon-button" aria-label="清除管理密钥" disabled={!adminKey} onClick={() => { setAdminKey(''); setKeyVisible(false); }}>{<X size={17}/>}</button></div><p id="collector-update-key-note" className="update-note">密钥仅在此页面内存中保留，刷新或离开诊断页后清除。检查版本也需要密钥。</p><details className="update-key-help"><summary>如何取得管理密钥</summary><p className="update-note">在 NAS 终端手动执行以下命令，再将输出粘贴到上方：</p><code>sudo cat /etc/ugreen-ups-updater/key</code><p className="update-note">请勿将命令输出放进截图、日志或分享文件。</p></details></div>
+    {actionError && <p className="update-feedback" role="status">{actionError}</p>}
+    {awaitingStatus && !pending && !readError && <p className="update-note" role="status">正在确认后台状态…</p>}
+    {controlsAvailable && <button type="button" className="update-button update-controls-toggle" aria-expanded={controlsOpen} aria-controls="collector-update-controls" onClick={() => { setControlsOpen(value => !value); setAdminKey(''); setKeyVisible(false); setIntent(null); }}>{controlsOpen ? '收起更新管理' : '检查与管理更新'}</button>}
+    {controlsOpen && controlsAvailable && <div id="collector-update-controls">
+      <div className="update-key-field"><label htmlFor="collector-update-admin-key"><KeyRound size={15}/>管理密钥</label><div className="update-key-input"><input id="collector-update-admin-key" type={keyVisible ? 'text' : 'password'} value={adminKey} autoComplete="off" autoCapitalize="none" spellCheck={false} maxLength={128} aria-describedby="collector-update-key-note" placeholder="手动粘贴 NAS 管理密钥" onChange={event => { setAdminKey(event.target.value); setActionError(''); }}/><button type="button" className="update-icon-button" aria-label={keyVisible ? '隐藏管理密钥' : '显示管理密钥'} aria-pressed={keyVisible} onClick={() => setKeyVisible(value => !value)}>{keyVisible ? <EyeOff size={17}/> : <Eye size={17}/>}</button><button type="button" className="update-icon-button" aria-label="清除管理密钥" disabled={!adminKey} onClick={() => { setAdminKey(''); setKeyVisible(false); }}>{<X size={17}/>}</button></div><p id="collector-update-key-note" className="update-note">密钥仅在此页面内存中保留，收起、刷新或离开诊断页后清除。检查版本也需要密钥。</p><details className="update-key-help"><summary>如何取得管理密钥</summary><p className="update-note">在 NAS 终端手动执行以下命令，再将输出粘贴到上方：</p><code>sudo cat /etc/ugreen-ups-updater/key</code><p className="update-note">请勿将命令输出放进截图、日志或分享文件。</p></details></div>
       <div className="update-actions"><button type="button" className="update-button" disabled={locked || !keyReady} onClick={() => void submit('check')}><RefreshCw size={15}/>检查更新</button>{installable && <button type="button" className="update-button update-button-primary" disabled={locked} onClick={selectInstall}><ArrowDownToLine size={15}/>查看并更新</button>}</div>
       {adminKey && !keyReady && <p className="update-feedback">请输入 NAS 生成的完整 43 位管理密钥。</p>}
-      {actionError && <p className="update-feedback" role="status">{actionError}</p>}
-      {awaitingStatus && !pending && !readError && <p className="update-note" role="status">正在确认后台状态…</p>}
       {intent && <div className="update-confirmation"><h4>{intent.action === 'install' ? `更新至 ${intent.target.version}` : `回退至 ${intent.target.version}`}</h4><p>{intent.action === 'install' ? `当前版本 ${intent.fromVersion}。` : `当前版本 ${intent.target.current_version}。`}采集器会短暂重启，恢复后继续记录。历史数据、校准设置和 NAS 原有 UPS 保护保持不变。</p>{intent.action === 'install' && <details className="update-digest"><summary>安装包校验信息</summary><code>SHA-256 {intent.target.sha256}</code></details>}{!intentCurrent && <p className="update-feedback">后台版本信息已改变，请取消后重新选择目标。</p>}<div className="update-actions"><button type="button" className="update-button update-button-primary" disabled={locked || !keyReady || !intentCurrent} onClick={() => void submit(intent.action, intent)}><CheckCircle2 size={15}/>{intent.action === 'install' ? '确认安装此版本' : '确认回退此版本'}</button><button type="button" className="update-button" onClick={() => setIntent(null)}>取消</button></div></div>}
       <details className="update-rollback"><summary><RotateCcw size={14}/>回退到上一版本</summary>{rollback ? <><p className="update-note">可回退至 {rollback.version}。将使用 NAS 已保留并确认兼容的版本。</p><button type="button" className="update-button" disabled={locked} onClick={selectRollback}>查看回退目标</button></> : <p className="update-note">{status.rollback.reason === 'legacy_backup' ? '保留的是旧版安装备份，需按说明手动回退。' : status.rollback.reason === 'incompatible' ? '上一版本与当前更新服务不兼容，暂不支持自动回退。' : '当前没有已确认可自动回退的版本。'}</p>}</details>
-    </>}
+    </div>}
     {status?.latest && <details className="update-release-notes"><summary>发行说明 · {status.latest.version}</summary>{status.latest.notes ? <p>{status.latest.notes}</p> : <p>此发行版未提供说明文字。</p>}<a className="update-link" href={collectorReleaseUrl(status.latest.version)!} target="_blank" rel="noreferrer">在 GitHub 查看完整发行说明 <ArrowUpRight size={14}/></a></details>}
     {status?.installed && <a className="update-link update-doc-link" href={COLLECTOR_UPDATE_DOCS} target="_blank" rel="noreferrer">安装与恢复说明 <ArrowUpRight size={14}/></a>}
   </article>;

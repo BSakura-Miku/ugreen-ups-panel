@@ -4,9 +4,9 @@
 
 <p align="center"><img src="frontend/src/assets/us3000-logo.png" width="80" height="80" alt="US3000 Monitor logo" /></p>
 
-![US3000 v0.7.0 dashboard: cell reference status and discharge energy records with demonstration data](docs/assets/dashboard-demo.png)
+![US3000 v0.10.0 dashboard: compact overview, history chart and cell readings with demonstration data](docs/assets/dashboard-demo.png)
 
-*v0.7.0 interface using DEMO data, with no real NAS telemetry or serial numbers. The UI and detailed documentation are primarily in Simplified Chinese.*
+*v0.10.0 interface using DEMO data, with no real NAS telemetry or serial numbers. The UI and detailed documentation are primarily in Simplified Chinese.*
 
 A UGREEN US3000 dashboard for power state, battery charge, cell voltages, and historical trends. A host collector uses Linux usbmon to observe existing UPS-driver traffic without writing to the UPS. Docker Compose runs the web dashboard.
 
@@ -14,7 +14,7 @@ A UGREEN US3000 dashboard for power state, battery charge, cell voltages, and hi
 
 ## Features
 
-- External power, charging, and battery power states.
+- Compact power-state and metric rows, with prominent battery-power alerts and qualified cell-difference warnings.
 - Charge percentage, input/output voltage, pack voltage, four cell voltages, and cell voltage difference.
 - Up to one year of history, power and connection events, and CSV export with averages and extrema.
 - Mean and peak cell voltage difference, with the actual dates covered by recorded data.
@@ -67,6 +67,8 @@ Successful installation starts the collector and enables it at boot.
 
 ## Update
 
+**v0.10.0 UI and history-query improvements only require a dashboard image update. Existing v0.9.1 collectors and updater services remain compatible.** See [storage and performance](docs/STORAGE.md) for retention and measured one-year queries.
+
 **v0.9.1 optionally supports [collector updates from the dashboard](docs/collector-update.md).** Install the separate host updater once and add its local socket-directory mount. Then enter the management key on the diagnostics page to check, install and roll back compatible collector releases. An existing v0.8.0 collector is a supported starting point; dashboard images still update through Docker.
 
 The following is the manual alternative. Complete diagnostics need a v0.8.0 or newer host collector. Follow the [backup instructions](docs/architecture.md#备份与维护) first. Replace the paths below with your existing deployment path and keep the original Compose project name; add `-p original-project-name` consistently if you previously set a custom name. Temporary source files are removed afterward; existing `data` and `docker-compose.yaml` are retained. Older collectors remain compatible with existing telemetry; new environment, version, and some system fields display as unknown.
@@ -76,7 +78,7 @@ The following is the manual alternative. Complete diagnostics need a v0.8.0 or n
   set -eu
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT
-  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.9.1 -o "$tmp_dir/source.tar.gz"
+  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.10.0 -o "$tmp_dir/source.tar.gz"
   tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir"
   sudo sh "$tmp_dir/scripts/install-collector.sh" --data-dir /volume1/docker/ugreen-ups-panel/data
   sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml pull

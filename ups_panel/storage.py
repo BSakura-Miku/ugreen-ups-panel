@@ -260,18 +260,23 @@ class Store:
         resolution = 10 if hours <= 24 else 60 if hours <= 2160 else DAY
         stride = max(resolution, math.ceil(hours * 3600 / 1200 / resolution) * resolution)
         start_bucket = math.floor(requested_start / DAY) * DAY if resolution == DAY else requested_start
-        with self.connect() as db:
-            rows = db.execute('SELECT bucket,first,last,count,mode,metrics,context FROM samples WHERE resolution=? AND bucket>=? AND bucket<=? ORDER BY bucket,first',
-                              (resolution, start_bucket, now)).fetchall()
         merged = {}
-        for bucket, first, last, count, mode, values, context in rows:
-            key = (int(bucket // stride * stride), mode, context)
-            item = merged.setdefault(key, {'timestamp': key[0], 'first': first, 'last': last, 'count': 0,
-                                          'mode': mode, 'context': json.loads(context), 'metrics': {}})
-            item['first'] = min(item['first'], first)
-            item['last'] = max(item['last'], last)
-            item['count'] += count
-            item['metrics'] = combine(item['metrics'], json.loads(values))
+        with self.connect() as db:
+            # The minute tier may contain 129,600 rows per context. Consume its
+            # indexed range without retaining every encoded row alongside the
+            # much smaller response. Keep source order and weighted sums intact.
+            rows = db.execute('SELECT bucket,first,last,count,mode,metrics,context FROM samples WHERE resolution=? AND bucket>=? AND bucket<=? ORDER BY bucket,first',
+                              (resolution, start_bucket, now))
+            for bucket, first, last, count, mode, values, context in rows:
+                key = (int(bucket // stride * stride), mode, context)
+                item = merged.get(key)
+                if item is None:
+                    item = merged[key] = {'timestamp': key[0], 'first': first, 'last': last, 'count': 0,
+                                          'mode': mode, 'context': json.loads(context), 'metrics': {}}
+                item['first'] = min(item['first'], first)
+                item['last'] = max(item['last'], last)
+                item['count'] += count
+                item['metrics'] = combine(item['metrics'], json.loads(values))
         result = []
         for item in merged.values():
             item['min'] = {k: v[2] for k, v in item['metrics'].items()}

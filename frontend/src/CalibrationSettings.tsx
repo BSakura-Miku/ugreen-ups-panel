@@ -211,11 +211,11 @@ export default function CalibrationSettings({ live, liveFresh, liveAge }: { live
       </form> : <button className="calibration-secondary" type="button" onClick={reload} disabled={!!busy}>重新载入</button>}
     </article>
 
-    <article className="panel calibration-formulas"><h3>系数如何参与估算</h3>
+    <details className="panel calibration-formulas"><summary>系数如何参与估算</summary>
       <p>交流输入功率 ≈ 交流基底系数 × 设备基底读数 + 回充补偿系数 × 电池充电功率原值</p>
       <p>电池放电功率 ≈ 电池放电系数 × 电池电压 × 设备放电电流</p>
       <p className="muted">两项估算都采用约 8 秒平滑。自定义交流估算按所选 12 / 19 / 20 V 档位、额定值 ±1 V 范围工作；旧配置仍使用 18–20 V。未充电时回充项为 0；回充或电池放电系数留空时，对应估算显示尚未校准。切换配置或供电状态后，需要等待读数稳定。</p>
       <p className="muted">交流输入包含适配器损耗与回充，电池放电对应电池端；两者都不等于 NAS 输出功率。系数是经验参数，并非转换效率。</p>
-    </article>
+    </details>
   </section>;
 }

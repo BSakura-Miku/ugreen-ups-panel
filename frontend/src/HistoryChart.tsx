@@ -125,17 +125,17 @@ export default function HistoryChart({ history, metric, unit }: { history: Histo
       backgroundColor: 'transparent', useUTC: daily,
       tooltip: {
         trigger: 'axis', renderMode: 'richText', backgroundColor: '#222b2b', borderColor: '#3b4744',
-        textStyle: { color: '#eef3ed', fontSize: 11, lineHeight: 18 }, confine: true,
+        textStyle: { color: '#eef3ed', fontSize: 12, lineHeight: 18 }, confine: true,
         formatter: (raw: unknown) => historyTooltip(raw, history, unit),
       },
-      legend: { show: metric === 'cells' || metric === 'cell_delta_mv', top: 0, left: 'center', textStyle: { color: '#a9b5ac', fontSize: 11 }, itemWidth: 18, itemGap: 12 },
+      legend: { show: metric === 'cells' || metric === 'cell_delta_mv', top: 0, left: 'center', textStyle: { color: '#a9b5ac', fontSize: 12 }, itemWidth: 18, itemGap: 12 },
       grid: { top: metric === 'cells' ? 58 : 38, left: 46, right: 18, bottom: 35 },
       xAxis: {
         type: 'time', min: isNumber(history.requested_start) ? history.requested_start * 1000 : undefined,
         max: isNumber(history.requested_end) ? history.requested_end * 1000 : undefined,
         axisLine: { lineStyle: { color: '#343e3a' } },
         axisLabel: {
-          color: '#a5b2ab', hideOverlap: true, fontSize: 10,
+          color: '#a5b2ab', hideOverlap: true, fontSize: 12,
           ...(daily ? { formatter: (value: number) => new Date(value).toISOString().slice(0, 10) } : {}),
         }, splitLine: { show: false }, splitNumber: 4,
       },

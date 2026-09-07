@@ -1,4 +1,4 @@
-import { BatteryCharging, CircleHelp } from 'lucide-react';
+import { AlertTriangle, BatteryCharging, CircleHelp } from 'lucide-react';
 import type { CellBalanceReport, Sample } from './types';
 import { cellBalancePresentation, cellNumberLabel, shortDurationLabel } from './batteryDisplay';
 
@@ -21,20 +21,21 @@ export default function CellBalanceCard({ sample, report, fresh, trendHours, tre
   const persistence = supported && finite(supported.persistence_sec) && supported.persistence_sec > 0 ? supported.persistence_sec : 120;
   const recent = !!supported && supported.recent_sample_count > 0;
   const currentLowest = fresh && supported && ['online', 'charging', 'battery'].includes(sample?.mode ?? '') ? supported.lowest_cells : [];
-  return <article className="panel cells cell-balance" aria-labelledby="cell-balance-heading">
-    <div className="panel-heading"><div><h3 id="cell-balance-heading">电芯状态</h3><p>4 节串联 · 待机压差参考</p></div><BatteryCharging size={19} /></div>
-    <div className="delta cell-balance-delta"><div><strong>{rawNumber(current?.cell_delta_mv, 0)}<span>mV</span></strong><span>当前压差</span></div><span className={`cell-reference-state ${view.tone}`}>{view.label}</span></div>
+  const warning = view.tone === 'elevated' || view.tone === 'check';
+  return <article className={`panel cells cell-balance cell-tone-${view.tone}`} aria-labelledby="cell-balance-heading">
+    <div className="panel-heading"><div><h3 id="cell-balance-heading" tabIndex={-1}>电芯状态</h3><p>4 节串联 · 连续待机后评估</p></div><BatteryCharging size={19} /></div>
+    <div className="delta cell-balance-delta"><div><strong>{rawNumber(current?.cell_delta_mv, 0)}<span>mV</span></strong><span>当前压差</span></div><span className={`cell-reference-state ${view.tone}`}>{warning && <AlertTriangle size={16}/>} {view.label}</span></div>
     <p className="cell-balance-advice">{view.advice}</p>
-    {view.showStandby && supported && <div className="cell-observation">
+    {view.showStandby && supported && <div className={`cell-observation ${supported.state === 'assessed' ? 'cell-observation-complete' : ''}`}>
       <div><span>连续待机观察</span><strong>{shortDurationLabel(supported.standby_duration_sec)}{supported.standby_duration_sec < standbyRequired ? ' / 30 分钟' : ' · 已满足 30 分钟'}</strong></div>
-      <progress value={progress(supported.standby_duration_sec, standbyRequired)} max={standbyRequired} aria-label="连续待机观察进度" />
+      {supported.state !== 'assessed' && <progress value={progress(supported.standby_duration_sec, standbyRequired)} max={standbyRequired} aria-label="连续待机观察进度" />}
       {view.showConfirmation && <><div className="cell-confirmation-label"><span>本轮等级确认</span><strong>{shortDurationLabel(supported.candidate_duration_sec)} / 2 分钟</strong></div><progress value={progress(supported.candidate_duration_sec, persistence)} max={persistence} aria-label="当前参考等级确认进度" /></>}
-      <p>{view.showConfirmation ? '等级变化后重新确认，观察期间不沿用先前等级。' : '按后台收到的连续样本计时；中断或工况变化后重新观察。'}</p>
+      {supported.state !== 'assessed' && <p>{view.showConfirmation ? '等级变化后重新确认，观察期间不沿用先前等级。' : '按连续样本计时；中断或工况变化后重新观察。'}</p>}
     </div>}
-    <div className="cell-list">{[0, 1, 2, 3].map(index => <div key={index} className={`cell-row ${currentLowest?.includes(index + 1) ? 'cell-current-lowest' : ''}`}>
-      <span>电芯 0{index + 1}</span><div className="cell-track"><i style={{ width: finite(current?.cells?.[index]) ? `${Math.max(0, Math.min(100, (current.cells[index] - 2.5) / 1.8 * 100))}%` : '0%' }} /></div><strong>{rawNumber(current?.cells?.[index], 3)} <small>V</small></strong>
-    </div>)}</div>
-    {currentLowest?.length > 0 && <p className="cell-current-note">当前最低：{currentLowest.map(cellNumberLabel).join('、')}{currentLowest.length > 1 ? '（并列）' : ''} · 单次读数不代表异常</p>}
+    <table className="cell-table"><caption className="visually-hidden">四节电芯电压；电压条按 2.5 至 4.3 V 显示，不表示容量或健康度</caption><thead><tr><th scope="col">电芯</th><th scope="col">电压参考</th><th scope="col">设备读数</th><th scope="col">标记</th></tr></thead><tbody>{[0, 1, 2, 3].map(index => <tr key={index} className={warning && currentLowest?.includes(index + 1) ? 'cell-warning-row' : ''}>
+      <th scope="row">0{index + 1}</th><td><div className="cell-track"><i style={{ width: finite(current?.cells?.[index]) ? `${Math.max(0, Math.min(100, (current.cells[index] - 2.5) / 1.8 * 100))}%` : '0%' }}/></div></td><td><strong>{rawNumber(current?.cells?.[index], 3)} <small>V</small></strong></td><td>{currentLowest?.includes(index + 1) ? <span className="cell-lowest-tag">最低</span> : '—'}</td>
+    </tr>)}</tbody></table>
+    <p className="cell-current-note">电压条为 2.5–4.3 V 参考；{currentLowest?.length ? `当前最低：${currentLowest.map(cellNumberLabel).join('、')}${currentLowest.length > 1 ? '（并列）' : ''}。` : ''}单次低读数不代表异常。</p>
     <div className="cell-recent-window">
       <h4>{fresh ? '最近待机窗口' : '上次收到的待机统计'} <span>最近 30 分钟内</span></h4>
       {recent ? <><div className="cell-recent-values"><div><span>最常偏低</span><strong>{cellNumberLabel(supported.frequent_lowest_cell)}</strong></div><div><span>窗口压差峰值</span><strong>{rawNumber(supported.recent_max_delta_mv, 0)} <small>mV</small></strong></div></div><p>{supported.recent_sample_count} 条本次连续待机样本{finite(supported.sample_timestamp) ? ` · 截至 ${new Date(supported.sample_timestamp * 1000).toLocaleTimeString('zh-CN', { hour12: false })}` : ''}</p></> : <p>连续待机后积累窗口数据，充放电读数不计入此统计。</p>}

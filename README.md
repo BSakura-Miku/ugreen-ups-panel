@@ -4,9 +4,9 @@
 
 <p align="center"><img src="frontend/src/assets/us3000-logo.png" width="80" height="80" alt="US3000 Monitor Logo" /></p>
 
-![US3000 v0.7.0 面板预览：电芯参考状态与放电能量记录（演示数据）](docs/assets/dashboard-demo.png)
+![US3000 v0.10.0 面板预览：紧凑总览、历史趋势与电芯读数（演示数据）](docs/assets/dashboard-demo.png)
 
-*v0.7.0 界面，使用 DEMO 演示数据，不包含实际 NAS 数据或序列号。*
+*v0.10.0 界面，使用 DEMO 演示数据，不包含实际 NAS 数据或序列号。*
 
 为 UGREEN US3000 提供供电状态、电量、电芯电压与历史趋势。宿主机采集器通过 Linux usbmon 只读观察已有 UPS 驱动的数据，Docker Compose 启动网页面板。
 
@@ -111,6 +111,8 @@ services:
 
 ## 更新
 
+**v0.10.0 的界面与历史查询优化只需更新面板镜像；已有 v0.9.1 采集器和更新服务继续兼容。**
+
 **v0.9.1 可选启用[网页采集器更新](docs/collector-update.md)。** 首次安装宿主更新服务并添加通信目录挂载后，可在「诊断与说明」检查新版、更新和回退；需要管理密钥。已有 v0.8.0 采集器可直接作为起点。面板镜像仍通过 Docker 更新。
 
 以下为不启用网页更新时的命令行流程。完整诊断需 v0.8.0 或更新的宿主采集器。 先按[备份说明](docs/architecture.md#备份与维护)保存数据库和校准配置。以下路径改成实际部署路径；所有 Compose 命令沿用原项目名，曾自定义项目名时统一加 `-p 原项目名`。源码下载到临时目录，安装后清理，原 `data` 与 `docker-compose.yaml` 保留。旧采集器仍可提供已有遥测，新增环境、版本及部分系统信息会显示未知。
@@ -120,7 +122,7 @@ services:
   set -eu
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT
-  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.9.1 -o "$tmp_dir/source.tar.gz"
+  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.10.0 -o "$tmp_dir/source.tar.gz"
   tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir"
   sudo sh "$tmp_dir/scripts/install-collector.sh" --data-dir /volume1/docker/ugreen-ups-panel/data
   sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml pull
@@ -150,7 +152,7 @@ services:
 - 历史按 10 秒统计保留 7 天、按分钟统计保留 90 天、按日统计保留 365 天。升级会从数据库中仍保留的旧记录补建日统计，已经过期删除的记录无法恢复。
 - 容器只读访问宿主机采集快照；采集器与原有 UPS 服务同时运行。
 
-数据流、历史存储和备份细节见[架构文档](docs/architecture.md)。
+数据流与备份见[架构文档](docs/architecture.md)，一年数据的保留方式、查询耗时与内存实测见[存储与性能](docs/STORAGE.md)。
 
 <a id="non-root"></a>
 
