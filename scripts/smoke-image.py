@@ -440,7 +440,8 @@ print(json.dumps({'uid': os.getuid(), 'machine': platform.machine(),
 # only the disposable capture mount; neither probe starts a collector or NUT.
 DIAGNOSTICS_PROBE = r'''
 import csv, io, json, re, sys, time
-from urllib.request import ProxyHandler, build_opener
+from urllib.request import ProxyHandler, Request, build_opener
+from urllib.error import HTTPError
 
 opener = build_opener(ProxyHandler({}))
 mode = sys.argv[1]
@@ -456,7 +457,7 @@ def diagnostics():
     assert 'application/json' in headers.get('content-type', '')
     data = json.loads(body)
     assert data['schema'] == data['observation']['schema'] == 1
-    assert data['versions']['panel']['version'] == '0.8.0', 'Unexpected installed panel version'
+    assert data['versions']['panel']['version'] == '0.9.0', 'Unexpected installed panel version'
     assert data['versions']['collector'] is None, 'Missing collector version was invented'
     assert data['versions']['usb_device_version'] is None, 'Missing USB version was invented'
     assert data['observation']['window_sec'] == 900 and data['observation']['max_samples'] == 4096
@@ -488,7 +489,7 @@ def check_exports(data, private=False):
         assert headers.get('content-disposition', '').startswith('attachment;'), 'Export is not a download'
     export = json.loads(json_body)
     assert export['schema'] == 1 and export['format'] == 'us3000-diagnostics'
-    assert export['versions']['panel']['version'] == '0.8.0'
+    assert export['versions']['panel']['version'] == '0.9.0'
     assert export['privacy']['mode'] == 'allowlist'
     def check_keys(value):
         if isinstance(value, dict):
@@ -530,6 +531,26 @@ def check_exports(data, private=False):
         assert export['versions']['ups_firmware'] is None
         assert len(points) == len(rows) == data['observation']['count'], 'Frozen export window gained or lost points'
     return len(points)
+
+def check_optional_updater():
+    body, _ = get('/api/collector-update')
+    status = json.loads(body)
+    assert status['schema'] == 1 and status['installed'] is False
+    assert status['availability'] == 'not_installed' and status['operation'] is None
+    assert status['auth_required'] is True
+    assert not status['update_available'] and status['latest'] is None
+    for headers, expected in (({'Content-Type': 'application/json'}, 403),
+        ({'Content-Type': 'application/json', 'X-UPS-Update': '1', 'X-UPS-Update-Key': 'A' * 43}, 503)):
+        try:
+            opener.open(Request('http://127.0.0.1:8080/api/collector-update/check', data=b'{}', headers=headers), timeout=3)
+        except HTTPError as error:
+            assert error.code == expected
+            response = error.read()
+            assert b'A' * 43 not in response
+        else:
+            raise AssertionError('Unavailable updater accepted an action')
+
+check_optional_updater()
 
 if mode == 'growing':
     first = wait_for(lambda data: data['observation']['count'] >= 1)

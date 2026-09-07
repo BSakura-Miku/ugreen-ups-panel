@@ -7,7 +7,7 @@ RUN npm run build
 
 FROM python:3.12-slim-bookworm@sha256:782412e85d0f0984994c290652577d4018aff08145c85b262bb63dc0c7522254
 WORKDIR /app
-ARG VERSION=0.8.0
+ARG VERSION=0.9.0
 ARG VCS_REF
 LABEL org.opencontainers.image.title="US3000 Power Monitor" \
       org.opencontainers.image.description="Read-only UGREEN US3000 dashboard for Linux NAS" \

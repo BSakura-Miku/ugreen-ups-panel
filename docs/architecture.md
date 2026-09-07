@@ -18,7 +18,7 @@
 
 Docker Desktop 可在开发电脑上构建面板镜像，但这不等于该电脑可以采集 NAS 的 USB 数据。真实采集器需要运行在连接 UPS、具备 Linux usbmon 和原 UPS 驱动的宿主机。容器通过快照文件读取数据，不通过网络自动寻找另一台 NAS。
 
-Compose 默认使用 `bsakuramiku/ugreen-ups-panel:latest`，通过 NAS 的 `9086` 端口提供页面，不需要项目 `.env` 文件。**v0.8.0 的完整诊断需要先更新宿主机采集器，再更新面板容器。** 从临时目录安装时通过 `--data-dir` 沿用原数据目录，保留校准文件和历史；源码无需长期留在 NAS 运行目录。仅面板变更的版本可执行 `docker compose pull && docker compose up -d`，具体以发布说明为准。
+Compose 默认使用 `bsakuramiku/ugreen-ups-panel:latest`，通过 NAS 的 `9086` 端口提供页面，不需要项目 `.env` 文件。**完整诊断需 v0.8.0 或更新的宿主采集器。v0.9.0 可选安装独立更新服务，从面板更新采集器；启用与权限见[网页更新](collector-update.md)。** 从临时目录安装时通过 `--data-dir` 沿用原数据目录，保留校准文件和历史；源码无需长期留在 NAS 运行目录。仅面板变更的版本可执行 `docker compose pull && docker compose up -d`，具体以发布说明为准。
 
 ```mermaid
 flowchart LR
@@ -151,3 +151,7 @@ v0.7.0 为新记录追加 `energy` 对象，包含未平滑电池功率的梯形
 回滚到旧采集器时，schema 2 校准文件也需要恢复为适用的兼容 schema 1 配置或 `none`。先备份当前配置，再按[校准回滚说明](calibration.md#升级与回滚)处理；保留已有历史，不通过删除数据库解决配置版本问题。
 
 卸载使用 `docker compose down` 和 `sudo sh scripts/uninstall-collector.sh`。这两步保留历史数据，采集器卸载脚本不管理原 UPS/NUT 服务。
+
+## 可选宿主更新服务
+
+v0.9.0 的更新服务独立安装在 `/opt/ugreen-ups-updater/current`，避免随采集器切换而重启自身。面板经只读挂载的本地 socket 目录发送固定动作，管理密钥由页面提供且不落盘。服务只下载固定仓库的正式发行包，使用已安装的固定安装器执行保留宿主配置的代码更新。状态保存在宿主 `/var/lib/ugreen-ups-updater`，与面板历史数据库分开。默认 Compose 无更新挂载；`compose.updater.yaml` 为可选覆盖配置。更新服务不调度自动更新，完整操作与恢复说明见[网页采集器更新](collector-update.md)。

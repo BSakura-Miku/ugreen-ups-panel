@@ -1,0 +1,48 @@
+[Unit]
+Description=US3000 local collector update service
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ugreen-ups-updater/current
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStartPre=/bin/chown 0:10001 /run/ugreen-ups-updater
+ExecStart=/usr/bin/python3 -m ups_panel.updater
+User=root
+Group=root
+UMask=0077
+RuntimeDirectory=ugreen-ups-updater
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
+StateDirectory=ugreen-ups-updater
+StateDirectoryMode=0700
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=180
+KillMode=mixed
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_CHOWN CAP_FOWNER
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/ugreen-ups-panel /run/lock
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=192M
+CPUQuota=25%
+StandardOutput=journal
+StandardError=journal
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=10
+
+[Install]
+WantedBy=multi-user.target

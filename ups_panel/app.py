@@ -19,6 +19,7 @@ from .power import finite_number
 from .cell_balance import CellBalanceMonitor
 from .raw_observation import RawObservationMonitor
 from .diagnostics import diagnostic_view, diagnostic_export, observation_csv
+from .update_api import install_update_routes
 from .calibration import (CalibrationError, DEFAULT_COEFFICIENTS, default_config,
                           load_config, normalize_config, save_config)
 
@@ -145,6 +146,7 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
                     LOG.exception('History flush failed')
 
     app = FastAPI(title='US3000 监控面板', lifespan=lifespan, docs_url=None, redoc_url=None)
+    install_update_routes(app, lambda: load_snapshot(snapshot))
 
     @app.middleware('http')
     async def headers(request, call_next):

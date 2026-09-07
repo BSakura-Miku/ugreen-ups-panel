@@ -27,6 +27,7 @@ jobs:
         run: |
           docker compose config --quiet
           docker compose -f docker-compose.yaml -f compose.build.yaml config --quiet
+          docker compose -f docker-compose.yaml -f compose.updater.yaml config --quiet
           docker build -t ugreen-ups-panel:ci .
           python scripts/smoke-image.py --image ugreen-ups-panel:ci --platform linux/amd64
       - name: Validate host collector commands
@@ -34,3 +35,6 @@ jobs:
           python -S -m ups_panel.collector --help
           python -S -m ups_panel.doctor --help
           python -S scripts/collector-admin.py --help
+          python -S -m ups_panel.updater --help
+          python -S scripts/updater-admin.py --help
+          python -S scripts/package-collector.py --help

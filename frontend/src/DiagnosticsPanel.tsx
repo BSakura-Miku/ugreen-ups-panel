@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, ArrowDownToLine, Cable, Cpu, Info, Radio } from 'lucide-react';
 import type { DiagnosticBuild, DiagnosticCheck, DiagnosticView, RawObservationPoint } from './types';
 import { buildRawTrace, diagnosticCount, diagnosticTime, diagnosticVersion, rawChannelLabel, runtimeObservation } from './diagnosticDisplay';
+import CollectorUpdatePanel from './CollectorUpdatePanel';
 
 const modes: Record<string, string> = { online: '外部供电', charging: '充电', battery: '电池供电', unknown: '工况未知' };
 const checkLabels: Record<DiagnosticCheck['status'], string> = { ok: '已确认', waiting: '等待', warning: '需关注', unknown: '未知', error: '异常' };
@@ -141,7 +142,7 @@ function DiagnosticsContent() {
     {error && <div className="notice diag-error" role="status">{error} 当前诊断读数已隐藏。</div>}
     {!error && data && !responseFresh && <div className="notice" role="status">诊断查询未及时更新，当前读数已隐藏。</div>}
     <div className="diag-top-grid">
-      <article className="panel diag-card" aria-labelledby="diag-versions-heading">
+      <div className="update-version-stack"><article className="panel diag-card" aria-labelledby="diag-versions-heading">
         <h3 id="diag-versions-heading"><Cpu size={18}/>版本信息</h3>
         <dl className="diag-values">
           <div><dt>面板</dt><dd><BuildValue build={versions?.panel}/></dd></div>
@@ -154,7 +155,7 @@ function DiagnosticsContent() {
           <div><dt>解码版本</dt><dd>{diagnosticCount(versions?.decoder_version)}</dd></div>
         </dl>
         <p className="diag-note">USB 描述符版本与 UPS 固件版本是不同字段；例如 1.00 不能据此解释成固件 V3.3。旧采集器未提供的信息显示为未知。</p>
-      </article>
+      </article><CollectorUpdatePanel fallbackCurrent={versions?.collector}/></div>
       <article className="panel diag-card" aria-labelledby="diag-connection-heading">
         <h3 id="diag-connection-heading"><Cable size={18}/>连接检查</h3>
         <p className="diag-note">逐项显示已观测到的连接条件；检查通过不代表电池或设备健康。</p>

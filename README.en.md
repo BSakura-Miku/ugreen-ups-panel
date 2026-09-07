@@ -24,6 +24,7 @@ A UGREEN US3000 dashboard for power state, battery charge, cell voltages, and hi
 - A step-by-step assistant using manually entered AC readings, with confirmed 12/19/20 V adapter input and editable coefficients.
 - Layered connection checks, system UPS reports, component versions, and an allowlisted diagnostic download.
 - 15/60-minute raw-byte trends and CSV for suspected-temperature channels A/B, segmented by operating context; their meaning remains unverified.
+- Optional authenticated collector updates from the diagnostics page, with progress, validation and compatible rollback.
 - Hardware references and protocol notes.
 
 Trend ranges include 1 hour, 24 hours, 7 days, 30 days, 90 days, half a year (180 days), and one year (365 days). Ranges longer than 90 days use daily aggregates. Charts keep the entire selected time range, leaving unrecorded periods and gaps empty; a few days of data remain a few days of data.
@@ -44,7 +45,7 @@ The v0.8.0 diagnostics page separates private capture from NUT queries and label
 
 Images support `linux/amd64` and `linux/arm64`. Real hardware validation covers one x86_64 NAS and US3000; ARM validation covers container operation only.
 
-The dashboard and API have no built-in authentication. Use them only on a trusted LAN.
+General telemetry and calibration APIs have no built-in login. Use them only on a trusted LAN. Optional collector update actions require a separate management key; use HTTPS when accessing them across networks.
 
 ## Install
 
@@ -66,14 +67,16 @@ Successful installation starts the collector and enables it at boot.
 
 ## Update
 
-**For complete v0.8.0 diagnostics, update the host collector before the dashboard.** Follow the [backup instructions](docs/architecture.md#备份与维护) first. Replace the paths below with your existing deployment path and keep the original Compose project name; add `-p original-project-name` consistently if you previously set a custom name. Temporary source files are removed afterward; existing `data` and `docker-compose.yaml` are retained. Older collectors remain compatible with existing telemetry; new environment, version, and some system fields display as unknown.
+**v0.9.0 optionally supports [collector updates from the dashboard](docs/collector-update.md).** Install the separate host updater once and add its local socket-directory mount. Then enter the management key on the diagnostics page to check, install and roll back compatible collector releases. An existing v0.8.0 collector is a supported starting point; dashboard images still update through Docker.
+
+The following is the manual alternative. Complete diagnostics need a v0.8.0 or newer host collector. Follow the [backup instructions](docs/architecture.md#备份与维护) first. Replace the paths below with your existing deployment path and keep the original Compose project name; add `-p original-project-name` consistently if you previously set a custom name. Temporary source files are removed afterward; existing `data` and `docker-compose.yaml` are retained. Older collectors remain compatible with existing telemetry; new environment, version, and some system fields display as unknown.
 
 ```sh
 (
   set -eu
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT
-  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.8.0 -o "$tmp_dir/source.tar.gz"
+  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.9.0 -o "$tmp_dir/source.tar.gz"
   tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir"
   sudo sh "$tmp_dir/scripts/install-collector.sh" --data-dir /volume1/docker/ugreen-ups-panel/data
   sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml pull

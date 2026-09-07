@@ -111,14 +111,16 @@ services:
 
 ## 更新
 
-**v0.8.0 完整诊断需先更新宿主机采集器，再更新面板。** 先按[备份说明](docs/architecture.md#备份与维护)保存数据库和校准配置。以下路径改成实际部署路径；所有 Compose 命令沿用原项目名，曾自定义项目名时统一加 `-p 原项目名`。源码下载到临时目录，安装后清理，原 `data` 与 `docker-compose.yaml` 保留。旧采集器仍可提供已有遥测，新增环境、版本及部分系统信息会显示未知。
+**v0.9.0 可选启用[网页采集器更新](docs/collector-update.md)。** 首次安装宿主更新服务并添加通信目录挂载后，可在「诊断与说明」检查新版、更新和回退；需要管理密钥。已有 v0.8.0 采集器可直接作为起点。面板镜像仍通过 Docker 更新。
+
+以下为不启用网页更新时的命令行流程。完整诊断需 v0.8.0 或更新的宿主采集器。 先按[备份说明](docs/architecture.md#备份与维护)保存数据库和校准配置。以下路径改成实际部署路径；所有 Compose 命令沿用原项目名，曾自定义项目名时统一加 `-p 原项目名`。源码下载到临时目录，安装后清理，原 `data` 与 `docker-compose.yaml` 保留。旧采集器仍可提供已有遥测，新增环境、版本及部分系统信息会显示未知。
 
 ```sh
 (
   set -eu
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT
-  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.8.0 -o "$tmp_dir/source.tar.gz"
+  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.9.0 -o "$tmp_dir/source.tar.gz"
   tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir"
   sudo sh "$tmp_dir/scripts/install-collector.sh" --data-dir /volume1/docker/ugreen-ups-panel/data
   sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml pull
@@ -222,7 +224,7 @@ NUT 能显示电量，不一定意味着驱动会读取面板所需的完整报�
 ## 更多文档
 
 - [架构与数据流](docs/architecture.md) · [协议字段](docs/fields.md) · [功率校准](docs/calibration.md)
-- [诊断与原始观察](docs/diagnostics.md) · [硬件资料](docs/hardware.md) · [验证范围](docs/validation.md) · [更新记录](CHANGELOG.md)
+- [采集器网页更新](docs/collector-update.md) · [诊断与原始观察](docs/diagnostics.md) · [硬件资料](docs/hardware.md) · [验证范围](docs/validation.md) · [更新记录](CHANGELOG.md)
 - [开发与贡献](CONTRIBUTING.md) · [安全说明](SECURITY.md)
 
 ## 参考与致谢

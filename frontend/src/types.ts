@@ -278,3 +278,46 @@ export type DiagnosticView = {
     };
   };
 };
+
+export type CollectorUpdateAvailability = 'ready' | 'not_installed' | 'unreachable' | 'incompatible';
+export type CollectorUpdateStage = 'checking' | 'downloading' | 'verifying' | 'installing' | 'restarting' | 'validating'
+  | 'rolling_back' | 'succeeded' | 'failed' | 'interrupted';
+export type CollectorUpdateStatus = {
+  schema: 1;
+  installed: boolean;
+  availability: CollectorUpdateAvailability;
+  updater_version: string | null;
+  updater_schema: 1;
+  current: { version: string; revision: string | null; source_sha256: string | null } | null;
+  latest: {
+    version: string;
+    tag: string;
+    release_id: number;
+    sha256: string;
+    size: number;
+    published_at: string | null;
+    notes: string;
+    url: string;
+  } | null;
+  checked_at: number | null;
+  update_available: boolean;
+  auth_required: true;
+  rollback: {
+    available: boolean;
+    version: string | null;
+    reason: 'available' | 'no_previous' | 'legacy_backup' | 'incompatible' | 'unknown';
+  };
+  operation: {
+    id: string;
+    action: 'check' | 'install' | 'rollback';
+    stage: CollectorUpdateStage;
+    busy: boolean;
+    started_at: number;
+    updated_at: number;
+    finished_at: number | null;
+    from_version: string | null;
+    to_version: string | null;
+    outcome: 'updated' | 'rolled_back' | 'restored' | 'manual_required' | 'checked' | null;
+    error: { code: string; message: string } | null;
+  } | null;
+};

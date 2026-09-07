@@ -1,0 +1,10 @@
+# Optional: first install the host updater; then use this file with docker-compose.yaml.
+services:
+  panel:
+    volumes:
+      - type: bind
+        source: /run/ugreen-ups-updater
+        target: /run/ugreen-ups-updater
+        read_only: true
+        bind:
+          create_host_path: false
