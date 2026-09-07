@@ -18,7 +18,7 @@ v0.9.0 在「诊断与说明」加入采集器更新。首次启用需在 NAS �
   ups_project_dir=/volume1/docker/ugreen-ups-panel
   ups_update_tmp="$(mktemp -d)"
   trap 'rm -rf "$ups_update_tmp"' EXIT
-  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.10.0 -o "$ups_update_tmp/source.tar.gz"
+  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.11.0 -o "$ups_update_tmp/source.tar.gz"
   tar -xzf "$ups_update_tmp/source.tar.gz" --strip-components=1 -C "$ups_update_tmp"
   sudo sh "$ups_update_tmp/scripts/install-updater.sh"
   # 首次创建可选覆盖文件；如已存在，先检查其内容，不覆盖个人设置。

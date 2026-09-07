@@ -13,7 +13,7 @@ FILES = (
     'deploy/ugreen-ups-collector.service', 'deploy/ugreen-ups-panel.tmpfiles.conf',
     'deploy/ugreen-ups-updater.service',
     'docs/fields.md', 'docs/calibration.md', 'docs/architecture.md', 'docs/hardware.md',
-    'docs/validation.md', 'docs/STORAGE.md', 'docs/battery-observation.md', 'docs/diagnostics.md', 'docs/collector-update.md', 'docs/assets/dashboard-demo.png',
+    'docs/validation.md', 'docs/STORAGE.md', 'docs/battery-observation.md', 'docs/battery-capacity.md', 'docs/diagnostics.md', 'docs/collector-update.md', 'docs/assets/dashboard-demo.png',
     'docs/assets/ugos-pro-enable-ssh.png', 'docs/assets/ugos-pro-docker-project.png',
     'scripts/install-collector.sh', 'scripts/rollback-collector.sh', 'scripts/uninstall-collector.sh',
     'scripts/collector-admin.py', 'scripts/check-public.py',

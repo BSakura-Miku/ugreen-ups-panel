@@ -1,4 +1,5 @@
 """Bounded SQLite aggregates: 10 seconds/7 days, 60 seconds/90 days, UTC days/365 days."""
+import copy
 import json
 import math
 from contextlib import contextmanager
@@ -10,6 +11,7 @@ import time
 
 from .power import finite_number
 from .battery_sessions import BatterySessions
+from .battery_capacity import BatteryCapacity
 
 METRICS = ('battery_energy_estimate_w', 'ac_input_estimate_w', 'battery_charge_current_candidate_a', 'battery_discharge_current_candidate_a', 'battery_charge_power_candidate_w', 'battery_discharge_power_candidate_w', 'soc', 'power_w', 'dc_power_estimate_w', 'input_voltage', 'output_voltage', 'adapter_input_voltage_v', 'ups_output_voltage_v', 'current', 'battery_voltage', 'cell_delta_mv')
 CONTEXT_FIELDS = ('calibration_profile', 'calibration_revision', 'calibration_coefficients', 'ac_estimate_model', 'battery_estimate_basis',
@@ -69,6 +71,7 @@ class Store:
             ''')
             self._migrate(db)
             self.battery_sessions = BatterySessions(db)
+            self.battery_capacity = BatteryCapacity(db)
         self.pending = {}
         self.dropped_buckets = 0
         self.last_ts = float(self.get_meta('last_ts') or 0)
@@ -192,6 +195,7 @@ class Store:
         now = time.time() if now is None else now
         sample = view.get('sample')
         self.battery_sessions.ingest(view)
+        self.battery_capacity.ingest(view)
         state = ('online:' + sample['mode']) if view['fresh'] else 'offline'
         if state != self.last_state:
             with self.connect() as db:
@@ -236,10 +240,41 @@ class Store:
                             entry['last'], (row[2] if row else 0) + entry['count'], mode, json.dumps(values), context))
             self._rollup_daily(db)
             self.battery_sessions.write(db)
+            self.battery_capacity.write(db)
             db.execute('INSERT OR REPLACE INTO meta VALUES(?,?)', ('last_ts', str(self.last_ts)))
         self.pending.clear()
         self.battery_sessions.committed()
+        self.battery_capacity.committed()
         self.last_flush = time.monotonic()
+
+    @synchronized
+    def capacity_reference(self, view):
+        return self.battery_capacity.snapshot(view, now=view.get('server_time'))
+
+    @synchronized
+    def reset_capacity_reference(self, view, expected_epoch_id):
+        # HTTP supplies a reader, so freshness is evaluated after acquiring the
+        # writer lock, not against a snapshot captured before waiting for it.
+        view = view() if callable(view) else view
+        observed_ts = self.battery_capacity.state['last_ts']
+        requested_ts = (view.get('sample') or {}).get('timestamp')
+        if (observed_ts is not None and finite_number(requested_ts)
+                and requested_ts < observed_ts):
+            raise ValueError('sample_changed')
+        current = self.battery_capacity.snapshot(view, now=view.get('server_time'))
+        epoch_id = current['epoch']['id'] if current['epoch'] else None
+        if expected_epoch_id != epoch_id:
+            raise ValueError('reference_changed')
+        # Preserve the previous reference if its replacement cannot be committed.
+        previous = copy.deepcopy(self.battery_capacity.__dict__)
+        try:
+            self.battery_capacity.reset(view)
+            self.flush()
+        except Exception:
+            self.battery_capacity.__dict__.clear()
+            self.battery_capacity.__dict__.update(previous)
+            raise
+        return self.battery_capacity.snapshot(view, now=view.get('server_time'))
 
     @synchronized
     def prune(self, now):

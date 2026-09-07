@@ -21,6 +21,7 @@
 - 稳定待机后显示压差参考等级、近期偏低电芯与观察建议。
 - 查看每次电池供电的起止时间、观测时长、起止电量，以及次数和电量净下降。
 - 记录观测范围内的估算放电量（Wh）、有效覆盖率和功率依据。
+- 以当前校准阶段为固定参考，对照相同电量区间、相近负载下的相对容量变化。
 - 用手工交流读数分步校准，或直接查看、调整功率系数；支持确认 12/19/20 V 适配器输入。
 - 分层检查连接、私有报文与系统 UPS 状态，查看各组件版本并下载脱敏诊断包。
 - 观察疑似温度 A/B 的 15/60 分钟原始字节趋势，按工况分段并导出 CSV；字段含义仍未验证。
@@ -33,6 +34,8 @@
 v0.7.0 的压差等级仅在连续待机 30 分钟、当前区间持续 2 分钟后确认，是项目参考提示，不是厂商健康标准。估算放电量从新版启用后的有效电池采样开始记录，需要已配置的电池倍率；旧记录不补算，无倍率时显示暂无估算。两项均不提供容量或 SOH 百分比，详见[电池观察说明](docs/battery-observation.md)。
 
 功率相关字段仍有协议解释和测点限制；可选经验模型默认关闭（校准配置 `none`），不套用开发样机系数，详见[功率校准](docs/calibration.md)。
+
+v0.11.0 的「相对容量参考」在启用时固定当前校准阶段，以首个合格的 90%→80% 放电区间作为 100% 基线。后续匹配记录与该基线比较，最近三次取中位数；基线不会随时间自动移动。尚无合格记录时显示建立进度，旧历史不补算。这个百分比表示相对于本次参考的变化，不是出厂 SOH，详见[相对容量参考](docs/battery-capacity.md)。
 
 v0.8.0 的「诊断与说明」页分别呈现私有采集和 NUT 查询的状态，系统告警均注明来源。A/B 暂不标温度单位或探头位置；短时观察最多保留 60 分钟、4096 点，重建容器后重新开始。诊断包按字段白名单导出，详见[诊断与原始观察](docs/diagnostics.md)。
 
@@ -111,7 +114,7 @@ services:
 
 ## 更新
 
-**v0.10.0 的界面与历史查询优化只需更新面板镜像；已有 v0.9.1 采集器和更新服务继续兼容。**
+**v0.11.0 的相对容量参考只需更新面板镜像；已有 v0.9.1 采集器和更新服务继续兼容。**
 
 **v0.9.1 可选启用[网页采集器更新](docs/collector-update.md)。** 首次安装宿主更新服务并添加通信目录挂载后，可在「诊断与说明」检查新版、更新和回退；需要管理密钥。已有 v0.8.0 采集器可直接作为起点。面板镜像仍通过 Docker 更新。
 
@@ -122,7 +125,7 @@ services:
   set -eu
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT
-  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.10.0 -o "$tmp_dir/source.tar.gz"
+  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.11.0 -o "$tmp_dir/source.tar.gz"
   tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir"
   sudo sh "$tmp_dir/scripts/install-collector.sh" --data-dir /volume1/docker/ugreen-ups-panel/data
   sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml pull

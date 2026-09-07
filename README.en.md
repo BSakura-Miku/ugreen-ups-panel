@@ -21,6 +21,7 @@ A UGREEN US3000 dashboard for power state, battery charge, cell voltages, and hi
 - Reference cell-voltage-difference levels after stable standby, with recent low-cell observations and guidance.
 - Individual battery-power records with start/end times, observed duration, start/end charge, occurrence counts, and net charge decrease.
 - Estimated discharge energy in Wh within observed intervals, with coverage and power provenance.
+- A fixed reference from the current calibration stage to compare relative capacity observations at matched charge ranges and loads.
 - A step-by-step assistant using manually entered AC readings, with confirmed 12/19/20 V adapter input and editable coefficients.
 - Layered connection checks, system UPS reports, component versions, and an allowlisted diagnostic download.
 - 15/60-minute raw-byte trends and CSV for suspected-temperature channels A/B, segmented by operating context; their meaning remains unverified.
@@ -34,6 +35,8 @@ Battery-power records begin with valid sampling after first enabling v0.5.0 or l
 In v0.7.0, reference levels require 30 minutes of continuous standby and 2 minutes in the current voltage-difference band. These are project guidance, not manufacturer health limits. Estimated discharge energy starts with valid samples observed by the new version and requires a configured battery gain; older records are not backfilled. Neither feature reports full battery capacity or SOH. See [battery observations](docs/battery-observation.md).
 
 Power fields still have protocol and measurement-location limitations. The optional empirical model is disabled by default (calibration profile `none`), so coefficients from the development unit are not applied. See [power calibration](docs/calibration.md).
+
+The v0.11.0 relative-capacity card locks the current calibration stage and uses its first qualifying 90%→80% discharge interval as a 100% reference. Subsequent matched intervals are compared with this fixed baseline, using the median of the latest three accepted observations. It shows collection progress until evidence is available and never backfills older history. The percentage describes change relative to this reference, not factory SOH. See [relative capacity reference](docs/battery-capacity.md).
 
 The v0.8.0 diagnostics page separates private capture from NUT queries and labels system-reported warnings. A/B have no temperature unit or sensor attribution. The in-memory window holds up to 60 minutes and 4096 points and restarts with the container. Downloads use a field allowlist; see [diagnostics and raw observations](docs/diagnostics.md).
 
@@ -67,7 +70,7 @@ Successful installation starts the collector and enables it at boot.
 
 ## Update
 
-**v0.10.0 UI and history-query improvements only require a dashboard image update. Existing v0.9.1 collectors and updater services remain compatible.** See [storage and performance](docs/STORAGE.md) for retention and measured one-year queries.
+**v0.11.0 relative capacity observations only require a dashboard image update. Existing v0.9.1 collectors and updater services remain compatible.** See [storage and performance](docs/STORAGE.md) for retention and measured one-year queries.
 
 **v0.9.1 optionally supports [collector updates from the dashboard](docs/collector-update.md).** Install the separate host updater once and add its local socket-directory mount. Then enter the management key on the diagnostics page to check, install and roll back compatible collector releases. An existing v0.8.0 collector is a supported starting point; dashboard images still update through Docker.
 
@@ -78,7 +81,7 @@ The following is the manual alternative. Complete diagnostics need a v0.8.0 or n
   set -eu
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT
-  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.10.0 -o "$tmp_dir/source.tar.gz"
+  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.11.0 -o "$tmp_dir/source.tar.gz"
   tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir"
   sudo sh "$tmp_dir/scripts/install-collector.sh" --data-dir /volume1/docker/ugreen-ups-panel/data
   sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml pull

@@ -349,6 +349,53 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
         except (sqlite3.Error, ValueError, TypeError, KeyError):
             raise HTTPException(503, '电池供电记录查询失败')
 
+    @app.get('/api/battery-capacity')
+    def battery_capacity():
+        try:
+            return store().capacity_reference(load_snapshot(snapshot))
+        except (sqlite3.Error, ValueError, TypeError, KeyError):
+            raise HTTPException(503, '相对容量参考暂不可用')
+
+    @app.post('/api/battery-capacity/reset')
+    async def reset_battery_capacity(request: Request):
+        if (request.headers.get('x-ups-capacity') != '1'
+                or request.headers.get('content-type', '').split(';', 1)[0].strip().lower() != 'application/json'):
+            raise HTTPException(403, '请通过面板重新建立参考。')
+        origin = request.headers.get('origin')
+        if origin is not None:
+            try:
+                parsed = urlsplit(origin)
+            except ValueError:
+                raise HTTPException(403, '浏览器来源无效。') from None
+            if (parsed.scheme not in ('http', 'https') or parsed.username is not None
+                    or parsed.path not in ('', '/') or parsed.query or parsed.fragment
+                    or parsed.netloc.casefold() != request.headers.get('host', '').casefold()):
+                raise HTTPException(403, '不允许跨站重新建立参考。')
+        if request.headers.get('sec-fetch-site') in ('cross-site', 'same-site'):
+            raise HTTPException(403, '请从当前面板页面重新建立参考。')
+        encoded = bytearray()
+        async for part in request.stream():
+            encoded.extend(part)
+            if len(encoded) > 1024:
+                raise HTTPException(413, '参考请求过大。')
+        try:
+            payload = json.loads(encoded)
+            if (not isinstance(payload, dict) or set(payload) != {'expected_epoch_id'}
+                    or payload['expected_epoch_id'] is not None and
+                    (not isinstance(payload['expected_epoch_id'], str) or len(payload['expected_epoch_id']) > 128)):
+                raise ValueError('invalid_request')
+        except (ValueError, TypeError, RecursionError):
+            raise HTTPException(400, '参考请求无效，请刷新页面。') from None
+        try:
+            return await asyncio.to_thread(store().reset_capacity_reference,
+                                           lambda: load_snapshot(snapshot), payload['expected_epoch_id'])
+        except ValueError as exc:
+            if str(exc) == 'reference_changed':
+                raise HTTPException(409, '参考已在其他页面改变，请刷新后重试。') from None
+            raise HTTPException(409, '需要新鲜、有效的电池放电校准配置才能建立参考。') from None
+        except (OSError, sqlite3.Error, TypeError, KeyError):
+            raise HTTPException(503, '参考保存失败，原参考已保留。') from None
+
     @app.get('/api/export.csv')
     def export(hours: int = Query(24, ge=1, le=8760)):
         rows = history(hours)['points']
