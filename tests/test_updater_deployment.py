@@ -1,5 +1,6 @@
 """Local installer transactions with fake systemd; no root or host services required."""
 from contextlib import contextmanager
+import configparser
 import hashlib
 import importlib.util
 import json
@@ -483,12 +484,32 @@ def test_service_keeps_system_configuration_read_only_and_allows_graceful_worker
                      'ReadWritePaths=/opt/ugreen-ups-panel /run/lock'):
         assert expected in unit
     assert 'docker.sock' not in unit and 'ListenStream=' not in unit
-    assert 'ExecStartPre=/bin/chown 0:10001 /run/ugreen-ups-updater' in unit
+    assert 'ExecStartPre=' not in unit
     for script in ('install-updater.sh', 'uninstall-updater.sh'):
         result = subprocess.run(['sh', '-n', str(ROOT / 'scripts' / script)], capture_output=True, text=True)
         assert result.returncode == 0, result.stderr
     result = subprocess.run([sys.executable, '-S', str(ROOT / 'scripts/updater-admin.py'), '--help'], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+def test_systemd_uses_existing_root_group_and_prepares_socket_inside_main_process():
+    from ups_panel.updater import UpdaterPaths
+    admin = load_admin('updater-admin.py')
+    unit = configparser.ConfigParser(interpolation=None)
+    unit.read(ROOT / 'deploy/ugreen-ups-updater.service')
+    service = unit['Service']
+    assert service['User'] == 'root'
+    assert service['Group'] == 'root'
+    assert admin.SOCKET_GID == UpdaterPaths().socket_gid == 10001
+    assert service['RuntimeDirectory'] == admin.RUNTIME.name == UpdaterPaths().socket.parent.name
+    assert int(service['RuntimeDirectoryMode'], 8) == 0o750
+    assert service['RuntimeDirectoryPreserve'] == 'yes'
+    assert 'ExecStartPre' not in service
+    # The socket group is assigned numerically inside ExecStart; systemd needs
+    # only the existing root group and keeps persistent state root:root.
+    assert service['StateDirectory'] == admin.STATE.name
+    assert int(service['StateDirectoryMode'], 8) == 0o700
+    assert int(service['UMask'], 8) == 0o077
 
 
 @pytest.fixture

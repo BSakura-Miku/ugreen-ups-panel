@@ -457,7 +457,7 @@ def diagnostics():
     assert 'application/json' in headers.get('content-type', '')
     data = json.loads(body)
     assert data['schema'] == data['observation']['schema'] == 1
-    assert data['versions']['panel']['version'] == '0.9.0', 'Unexpected installed panel version'
+    assert data['versions']['panel']['version'] == '0.9.1', 'Unexpected installed panel version'
     assert data['versions']['collector'] is None, 'Missing collector version was invented'
     assert data['versions']['usb_device_version'] is None, 'Missing USB version was invented'
     assert data['observation']['window_sec'] == 900 and data['observation']['max_samples'] == 4096
@@ -489,7 +489,7 @@ def check_exports(data, private=False):
         assert headers.get('content-disposition', '').startswith('attachment;'), 'Export is not a download'
     export = json.loads(json_body)
     assert export['schema'] == 1 and export['format'] == 'us3000-diagnostics'
-    assert export['versions']['panel']['version'] == '0.9.0'
+    assert export['versions']['panel']['version'] == '0.9.1'
     assert export['privacy']['mode'] == 'allowlist'
     def check_keys(value):
         if isinstance(value, dict):

@@ -4,6 +4,8 @@ v0.9.0 在「诊断与说明」加入采集器更新。首次启用需在 NAS �
 
 它只处理本项目采集器代码。面板 Docker 镜像、宿主更新服务自身、NUT、UPS 固件和 NAS 系统仍分别维护。没有定时检查或自动安装；打开页面、刷新状态均不访问发行服务器。
 
+请使用 v0.9.1 或更新版本的安装脚本；v0.9.0 的更新服务在部分 systemd 环境中会因通信目录的属组被重置而启动失败。安装失败会撤销更新服务安装，原采集器继续运行。
+
 ## 首次启用
 
 先按 [README](../README.md)安装并确认已有采集器正常工作。v0.8.0 采集器可直接作为网页更新的起点。备份原数据库与校准配置，见[备份说明](architecture.md#备份与维护)。
@@ -16,7 +18,7 @@ v0.9.0 在「诊断与说明」加入采集器更新。首次启用需在 NAS �
   ups_project_dir=/volume1/docker/ugreen-ups-panel
   ups_update_tmp="$(mktemp -d)"
   trap 'rm -rf "$ups_update_tmp"' EXIT
-  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.9.0 -o "$ups_update_tmp/source.tar.gz"
+  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.9.1 -o "$ups_update_tmp/source.tar.gz"
   tar -xzf "$ups_update_tmp/source.tar.gz" --strip-components=1 -C "$ups_update_tmp"
   sudo sh "$ups_update_tmp/scripts/install-updater.sh"
   # 首次创建可选覆盖文件；如已存在，先检查其内容，不覆盖个人设置。

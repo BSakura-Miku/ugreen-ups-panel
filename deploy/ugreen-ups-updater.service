@@ -9,7 +9,6 @@ StartLimitBurst=5
 Type=simple
 WorkingDirectory=/opt/ugreen-ups-updater/current
 Environment=PYTHONDONTWRITEBYTECODE=1
-ExecStartPre=/bin/chown 0:10001 /run/ugreen-ups-updater
 ExecStart=/usr/bin/python3 -m ups_panel.updater
 User=root
 Group=root

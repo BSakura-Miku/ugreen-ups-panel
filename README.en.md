@@ -67,7 +67,7 @@ Successful installation starts the collector and enables it at boot.
 
 ## Update
 
-**v0.9.0 optionally supports [collector updates from the dashboard](docs/collector-update.md).** Install the separate host updater once and add its local socket-directory mount. Then enter the management key on the diagnostics page to check, install and roll back compatible collector releases. An existing v0.8.0 collector is a supported starting point; dashboard images still update through Docker.
+**v0.9.1 optionally supports [collector updates from the dashboard](docs/collector-update.md).** Install the separate host updater once and add its local socket-directory mount. Then enter the management key on the diagnostics page to check, install and roll back compatible collector releases. An existing v0.8.0 collector is a supported starting point; dashboard images still update through Docker.
 
 The following is the manual alternative. Complete diagnostics need a v0.8.0 or newer host collector. Follow the [backup instructions](docs/architecture.md#备份与维护) first. Replace the paths below with your existing deployment path and keep the original Compose project name; add `-p original-project-name` consistently if you previously set a custom name. Temporary source files are removed afterward; existing `data` and `docker-compose.yaml` are retained. Older collectors remain compatible with existing telemetry; new environment, version, and some system fields display as unknown.
 
@@ -76,7 +76,7 @@ The following is the manual alternative. Complete diagnostics need a v0.8.0 or n
   set -eu
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT
-  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.9.0 -o "$tmp_dir/source.tar.gz"
+  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.9.1 -o "$tmp_dir/source.tar.gz"
   tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir"
   sudo sh "$tmp_dir/scripts/install-collector.sh" --data-dir /volume1/docker/ugreen-ups-panel/data
   sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml pull

@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import socket
+import stat
 import tempfile
 import threading
 import time
@@ -302,6 +303,97 @@ def test_unsafe_local_secret_or_state_paths_are_rejected(rig, kind):
         rig.paths.state.symlink_to(other)
     with pytest.raises((OSError, ValueError)):
         updater.UpdateManager(rig.paths, rig.client, rig.manager.helper)
+
+
+def simulated_systemd_directory(tmp_path, monkeypatch, *, uid=0, gid=0, mode=0o750):
+    """Model root/group identities while keeping chmod on an actual local directory."""
+    directory = tmp_path / 'runtime'
+    directory.mkdir()
+    directory.chmod(mode)
+    inode = directory.stat().st_ino
+    actual_fstat = os.fstat
+    actual_fchmod = os.fchmod
+    identity = {'uid': uid, 'gid': gid}
+    mutations, descriptors = [], []
+    def inspect(fd):
+        value = actual_fstat(fd)
+        if value.st_ino == inode:
+            descriptors.append(fd)
+            fields = list(value)
+            fields[4], fields[5] = identity['uid'], identity['gid']
+            return os.stat_result(fields)
+        return value
+    def chown(fd, owner, group):
+        assert actual_fstat(fd).st_ino == inode
+        mutations.append(('chown', owner, group))
+        identity.update(uid=owner, gid=group)
+    def chmod(fd, value):
+        assert actual_fstat(fd).st_ino == inode
+        mutations.append(('chmod', value))
+        actual_fchmod(fd, value)
+    monkeypatch.setattr(updater.os, 'fstat', inspect)
+    monkeypatch.setattr(updater.os, 'fchown', chown)
+    monkeypatch.setattr(updater.os, 'fchmod', chmod)
+    paths = updater.UpdaterPaths(socket=directory / 'control.sock')
+    return SimpleNamespace(paths=paths, directory=directory, identity=identity, mutations=mutations,
+                           descriptors=descriptors, actual_fstat=actual_fstat)
+
+
+@pytest.mark.parametrize('initial_gid,mode', [(0, 0o750), (0, 0o700), (10001, 0o750)])
+def test_runtime_setup_handles_systemd_root_group_without_group_database(tmp_path, monkeypatch, initial_gid, mode):
+    runtime = simulated_systemd_directory(tmp_path, monkeypatch, gid=initial_gid, mode=mode)
+    updater.prepare_socket_directory(runtime.paths)
+    assert runtime.identity == {'uid': 0, 'gid': 10001}
+    assert stat.S_IMODE(runtime.directory.stat().st_mode) == 0o750
+    assert runtime.mutations == [('chown', 0, 10001), ('chmod', 0o750)]
+    assert not runtime.paths.socket.exists()
+    for descriptor in set(runtime.descriptors):
+        with pytest.raises(OSError):
+            runtime.actual_fstat(descriptor)
+
+
+@pytest.mark.parametrize('uid,gid,mode', [(1, 0, 0o750), (0, 10002, 0o750),
+                                       (0, 0, 0o770), (0, 0, 0o751), (0, 0, 0o755)])
+def test_runtime_setup_never_repairs_untrusted_owner_group_or_permissions(tmp_path, monkeypatch, uid, gid, mode):
+    runtime = simulated_systemd_directory(tmp_path, monkeypatch, uid=uid, gid=gid, mode=mode)
+    with pytest.raises(ValueError, match='socket directory permissions'):
+        updater.prepare_socket_directory(runtime.paths)
+    assert not runtime.mutations
+    assert runtime.identity == {'uid': uid, 'gid': gid}
+    assert stat.S_IMODE(runtime.directory.stat().st_mode) == mode
+    assert not runtime.paths.socket.exists()
+    for descriptor in set(runtime.descriptors):
+        with pytest.raises(OSError):
+            runtime.actual_fstat(descriptor)
+
+
+def test_runtime_setup_does_not_follow_parent_symlink_or_modify_its_target(tmp_path, monkeypatch):
+    target = tmp_path / 'private-target'
+    target.mkdir(mode=0o700)
+    (target / 'keep').write_text('unchanged')
+    link = tmp_path / 'runtime-link'
+    link.symlink_to(target, target_is_directory=True)
+    before = target.stat()
+    mutations = []
+    monkeypatch.setattr(updater.os, 'fchown', lambda *args: mutations.append(args))
+    monkeypatch.setattr(updater.os, 'fchmod', lambda *args: mutations.append(args))
+    with pytest.raises(OSError):
+        updater.prepare_socket_directory(updater.UpdaterPaths(socket=link / 'control.sock'))
+    after = target.stat()
+    assert (after.st_uid, after.st_gid, after.st_mode) == (before.st_uid, before.st_gid, before.st_mode)
+    assert (target / 'keep').read_text() == 'unchanged' and not mutations
+
+
+def test_runtime_setup_stops_and_closes_descriptor_if_numeric_chown_fails(tmp_path, monkeypatch):
+    runtime = simulated_systemd_directory(tmp_path, monkeypatch, mode=0o700)
+    monkeypatch.setattr(updater.os, 'fchown', lambda *args: (_ for _ in ()).throw(PermissionError('chown unavailable')))
+    with pytest.raises(PermissionError):
+        updater.prepare_socket_directory(runtime.paths)
+    assert runtime.identity == {'uid': 0, 'gid': 0} and not runtime.mutations
+    assert stat.S_IMODE(runtime.directory.stat().st_mode) == 0o700
+    for descriptor in set(runtime.descriptors):
+        with pytest.raises(OSError):
+            runtime.actual_fstat(descriptor)
 
 
 def test_real_unix_socket_round_trip_permissions_auth_and_bounded_frames(rig):

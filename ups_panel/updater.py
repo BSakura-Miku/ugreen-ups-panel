@@ -467,6 +467,26 @@ class UpdateHandler(socketserver.StreamRequestHandler):
             pass
 
 
+def prepare_socket_directory(paths):
+    """Apply the fixed socket group after systemd's per-exec directory setup."""
+    descriptor = os.open(paths.socket.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(descriptor)
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != paths.trusted_uid
+                or info.st_gid not in (0, paths.socket_gid) or info.st_mode & 0o027):
+            raise ValueError('Invalid updater socket directory permissions')
+        # Numeric fchown does not require a corresponding /etc/group entry.
+        os.fchown(descriptor, paths.trusted_uid, paths.socket_gid)
+        os.fchmod(descriptor, 0o750)
+        prepared = os.fstat(descriptor)
+        if (not stat.S_ISDIR(prepared.st_mode) or prepared.st_uid != paths.trusted_uid
+                or prepared.st_gid != paths.socket_gid or stat.S_IMODE(prepared.st_mode) != 0o750
+                or (prepared.st_dev, prepared.st_ino) != (info.st_dev, info.st_ino)):
+            raise ValueError('Invalid updater socket directory permissions')
+    finally:
+        os.close(descriptor)
+
+
 class UpdateServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     daemon_threads = False
     request_queue_size = 8
@@ -476,6 +496,7 @@ class UpdateServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
         self.manager = manager
         self.slots = threading.BoundedSemaphore(8)
         path = manager.paths.socket
+        prepare_socket_directory(manager.paths)
         info = path.parent.lstat()
         if (not stat.S_ISDIR(info.st_mode) or info.st_uid != manager.paths.trusted_uid
                 or info.st_gid != manager.paths.socket_gid or info.st_mode & 0o027):
