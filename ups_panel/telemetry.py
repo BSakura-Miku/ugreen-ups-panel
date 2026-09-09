@@ -144,7 +144,6 @@ def _unique_object(pairs):
 
 
 def load_snapshot(path, now=None):
-    now = time.time() if now is None else now
     try:
         with Path(path).open('rb') as source:
             encoded = source.read(MAX_SNAPSHOT_BYTES + 1)
@@ -184,6 +183,10 @@ def load_snapshot(path, now=None):
             if (not isinstance(sample.get('warnings', []), list)
                     or any(not isinstance(warning, str) for warning in sample.get('warnings', []))):
                 raise ValueError('Invalid warnings')
+        # The collector atomically replaces this file. Take the implicit clock
+        # after reading it, so a publication during the read cannot look future-
+        # dated relative to a time captured before opening the newer snapshot.
+        now = time.time() if now is None else now
         age = now - sample['timestamp'] if sample else None
         heartbeat_age = now - value['heartbeat']
         value.update(fresh=sample is not None and 0 <= age <= 10 and 0 <= heartbeat_age <= 10,
@@ -197,6 +200,7 @@ def load_snapshot(path, now=None):
             _disable_estimates(sample)
         return value
     except (OSError, ValueError, TypeError, KeyError, RecursionError) as exc:
+        now = time.time() if now is None else now
         return {'fresh': False, 'sample': None, 'age_sec': None, 'server_time': now,
                 'source': 'unavailable', 'nut': {'available': False},
                 'diagnostics': {'error': '尚未收到有效采集数据'}, 'read_error': type(exc).__name__,

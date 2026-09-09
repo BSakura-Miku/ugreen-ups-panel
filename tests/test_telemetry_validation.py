@@ -10,6 +10,7 @@ from ups_panel.diagnostics import diagnostic_view
 from ups_panel.power import ESTIMATE_FIELDS, PowerEstimator
 from ups_panel.protocol import parse_frame
 from ups_panel.storage import Store
+from ups_panel import telemetry
 from ups_panel.telemetry import MAX_SNAPSHOT_BYTES, load_snapshot
 
 
@@ -186,6 +187,63 @@ def test_byte_limit_and_freshness_are_independent_of_calibration_validity(tmp_pa
     assert not stale['fresh'] and stale['calibration_validation']['valid']
     path.write_bytes(path.read_bytes() + b' ')
     assert load_snapshot(path, now=1000)['calibration_validation']['reason'] == 'snapshot_unavailable'
+
+
+@pytest.mark.parametrize('explicit_now', [None, 1002])
+def test_atomic_snapshot_replacement_during_read_preserves_freshness(tmp_path, monkeypatch, explicit_now):
+    path = tmp_path / 'latest.json'
+    store = Store(tmp_path / 'history.sqlite')
+    store.ingest(read(path, snapshot(now=1000)), now=1000)
+    replacement = tmp_path / 'replacement.json'
+    replacement.write_text(json.dumps(snapshot(now=1002.002)))
+    clock = {'now': 1002}
+    real_open = Path.open
+
+    def replace_before_open(target, *args, **kwargs):
+        if target == path:
+            replacement.replace(path)
+            clock['now'] = 1002.004
+        return real_open(target, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(telemetry.time, 'time', lambda: clock['now'])
+        patch.setattr(Path, 'open', replace_before_open)
+        value = load_snapshot(path, now=explicit_now)
+    assert value['server_time'] == (1002.004 if explicit_now is None else explicit_now)
+    assert value['fresh'] is (explicit_now is None)
+    assert value['calibration_validation']['valid']
+    if explicit_now is None:
+        store.ingest(value, now=value['server_time'])
+        assert [event['detail'] for event in store.events()] == ['online:online']
+
+
+@pytest.mark.parametrize('sample_ts,heartbeat,fresh', [
+    (990, 990, True), (989.999999, 1000, False), (1000, 989.999999, False),
+    (1000.000001, 1000, False), (1000, 1000.000001, False),
+])
+def test_implicit_clock_keeps_exact_stale_and_future_bounds(tmp_path, monkeypatch, sample_ts, heartbeat, fresh):
+    value = snapshot(now=sample_ts)
+    value['heartbeat'] = heartbeat
+    path = tmp_path / 'latest.json'
+    path.write_text(json.dumps(value))
+    monkeypatch.setattr(telemetry.time, 'time', lambda: 1000)
+    result = load_snapshot(path)
+    assert result['server_time'] == 1000
+    assert result['fresh'] is fresh
+    assert result['calibration_validation']['valid']
+
+
+@pytest.mark.parametrize('malformed', [False, True])
+@pytest.mark.parametrize('explicit_now', [None, 999])
+def test_snapshot_read_errors_keep_a_valid_evaluation_time(tmp_path, monkeypatch, malformed, explicit_now):
+    path = tmp_path / 'latest.json'
+    if malformed:
+        path.write_text('{')
+    monkeypatch.setattr(telemetry.time, 'time', lambda: 1000)
+    result = load_snapshot(path, now=explicit_now)
+    assert result['server_time'] == (1000 if explicit_now is None else explicit_now)
+    assert result['fresh'] is False and result['sample'] is None
+    assert result['read_error'] == ('JSONDecodeError' if malformed else 'FileNotFoundError')
 
 
 def test_bad_calibration_records_raw_history_without_power_or_bad_provenance(tmp_path):
