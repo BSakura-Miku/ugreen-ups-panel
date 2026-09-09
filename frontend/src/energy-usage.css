@@ -1,0 +1,104 @@
+.energy-usage{margin-top:14px;min-width:0}
+.energy-usage .energy-heading{align-items:flex-start;flex-wrap:nowrap}
+.energy-heading h3{display:flex;align-items:center;gap:7px;line-height:1.5}
+.energy-heading h3>svg{color:#b5cd9f}
+.energy-zone-label{flex-shrink:0;font-size:12px;line-height:1.6;color:#a8bd9a;padding-top:1px}
+.energy-summaries{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin:17px 0 18px;padding-bottom:16px;border-bottom:1px solid var(--line)}
+.energy-summaries>div{display:block;padding:0 15px 0 0;border:0;border-right:1px solid var(--line);min-width:0}
+.energy-summaries>div:last-child{border-right:0;padding-right:0}
+.energy-summaries dt{font-size:12px;line-height:1.5;color:#adbea3}
+.energy-summaries dd{text-align:left;font-size:29px;line-height:1.5;margin:3px 0 0;color:#dbebd2;font-variant-numeric:tabular-nums;font-weight:500;letter-spacing:-.5px;overflow-wrap:anywhere}
+.energy-summaries small{font-size:12px;letter-spacing:0;font-weight:400;color:#a9bd9c;margin-left:6px;white-space:nowrap}
+.energy-summaries p{font-size:12px;line-height:1.6;color:#a1b496;margin:3px 0 0;display:flex;align-items:center;gap:5px 9px;flex-wrap:wrap}
+.energy-segment-badge{display:inline-block;font-size:11px;line-height:1.5;border:1px solid #465a41;padding:1px 5px;border-radius:4px;color:#bad0ae;white-space:nowrap}
+.energy-main-grid{display:grid;grid-template-columns:minmax(330px,1.2fr) minmax(260px,1fr);gap:22px;align-items:start}
+.energy-calendar-section,.energy-day-detail{min-width:0}
+.energy-month-navigation{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 3px 7px}
+.energy-month-navigation h4,.energy-day-heading h4{font-size:14px;line-height:1.6;font-weight:500;color:#d0dfc5;margin:0}
+.energy-month-buttons{display:flex;align-items:center;gap:5px;flex-shrink:0}
+.energy-month-buttons button{display:inline-flex;align-items:center;justify-content:center;min-height:32px;min-width:32px;padding:5px;color:#c5dcb6;background:#263323;border:1px solid #40553a;border-radius:5px}
+.energy-month-buttons button:disabled{opacity:.35;cursor:default}
+.energy-month-buttons .energy-current-month{font-size:12px;padding-inline:9px;margin-right:2px}
+.energy-calendar{width:100%;table-layout:fixed;border-collapse:separate;border-spacing:4px;font-variant-numeric:tabular-nums}
+.energy-calendar th{text-align:center;font-size:12px;line-height:1.5;font-weight:400;color:#9daf92;padding:3px 0 6px}
+.energy-calendar td{padding:0;vertical-align:top}
+.energy-calendar-day{display:flex;flex-direction:column;align-items:stretch;justify-content:space-between;width:100%;min-width:0;min-height:59px;padding:7px 7px 6px;border:1px solid #34422f;border-radius:5px;background:#202a23;color:#b5c5aa;text-align:left;font-size:12px;line-height:1.5;font-variant-numeric:tabular-nums}
+.energy-calendar-date{display:flex;align-items:center;justify-content:space-between;gap:3px;min-width:0;font-size:12px;line-height:1.4}
+.energy-calendar-date small{font-size:10px;line-height:1.5;color:#d7ecbd}
+.energy-calendar-value{display:block;font-size:12px;line-height:1.5;color:#d5e5cb;margin-top:7px;white-space:nowrap}
+.energy-heat-0{background:#202a23}
+.energy-calendar-day.energy-heat-1,.energy-heat-legend .energy-heat-1{background:#273722}
+.energy-calendar-day.energy-heat-2,.energy-heat-legend .energy-heat-2{background:#31462a}
+.energy-calendar-day.energy-heat-3,.energy-heat-legend .energy-heat-3{background:#3b5530}
+.energy-calendar-day.energy-heat-4,.energy-heat-legend .energy-heat-4{background:#456435}
+.energy-calendar-day.energy-heat-5,.energy-heat-legend .energy-heat-5{background:#4b6f39}
+.energy-calendar-day:is(.energy-heat-3,.energy-heat-4,.energy-heat-5){color:#e0edd7}
+.energy-calendar-day:is(.energy-heat-3,.energy-heat-4,.energy-heat-5) .energy-calendar-value{color:#eff8e8}
+.energy-calendar-day.is-selected{border-color:#c0e59c;box-shadow:inset 0 0 0 1px #c0e59c}
+.energy-calendar-day.is-today .energy-calendar-date>span{color:#d6f3b5;font-weight:600}
+.energy-calendar-day:not(:disabled):hover{border-color:#a1c582}
+.energy-calendar-day:focus-visible{outline:2px solid var(--lime);outline-offset:2px;position:relative;z-index:1}
+.energy-calendar-day.is-future{background:transparent;border-color:#28342a;color:#6e8069;cursor:default}
+.energy-calendar-day:disabled:not(.is-future){cursor:default}
+.energy-partial-dot{display:inline-block;width:4px;height:4px;flex-shrink:0;border-radius:50%;background:#c5d4b9}
+.energy-calendar-legend{display:flex;align-items:center;justify-content:space-between;gap:6px 14px;flex-wrap:wrap;margin:8px 3px 0;font-size:11px;line-height:1.5;color:#9fb191}
+.energy-calendar-legend>span{display:inline-flex;align-items:center;gap:6px}
+.energy-heat-legend i{display:block;width:9px;height:9px;border-radius:2px;border:1px solid #5b744b}
+.energy-calendar-legend .energy-heat-legend{gap:4px}
+.energy-day-detail{border-left:1px solid var(--line);padding-left:20px}
+.energy-day-heading{display:flex;align-items:center;justify-content:space-between;gap:7px 10px;flex-wrap:wrap;min-height:32px}
+.energy-day-status{font-size:11px;line-height:1.5;color:#acc39d;white-space:nowrap}
+.energy-day-totals{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:13px}
+.energy-day-totals>div{min-width:0}
+.energy-day-totals span{display:block;font-size:12px;line-height:1.5;color:#a4b999}
+.energy-day-totals strong{display:block;font-size:24px;line-height:1.5;font-weight:500;font-variant-numeric:tabular-nums;color:#d8e8cf;margin-top:3px;overflow-wrap:anywhere}
+.energy-day-totals small{font-size:12px;line-height:1.5;font-weight:400;color:#a5ba98;margin-left:5px}
+.energy-day-coverage{margin-top:14px}
+.energy-day-coverage>div{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:12px;line-height:1.5;color:#a8bd9c}
+.energy-day-coverage strong{font-size:12px;font-weight:500;color:#d0dfc4}
+.energy-day-coverage progress{display:block;appearance:none;width:100%;height:4px;border:0;border-radius:3px;background:#34422f;overflow:hidden;margin:8px 0;accent-color:var(--lime)}
+.energy-day-coverage progress::-webkit-progress-bar{background:#34422f;border-radius:3px}
+.energy-day-coverage progress::-webkit-progress-value{background:#95bf76;border-radius:3px}
+.energy-day-coverage progress::-moz-progress-bar{background:#95bf76;border-radius:3px}
+.energy-day-coverage p,.energy-detail-note,.energy-detail-placeholder{font-size:12px;line-height:1.7;color:#a8ba9d;margin:7px 0 0;overflow-wrap:anywhere}
+.energy-detail-note .energy-segment-badge{margin-right:6px}
+.energy-detail-placeholder{min-height:160px;display:flex;align-items:center;justify-content:center;text-align:center}
+.energy-hourly-chart{margin:13px 0 0;min-width:0}
+.energy-hourly-chart svg{display:block;width:100%;height:auto;overflow:visible}
+.energy-chart-grid{stroke:#3b4d34;stroke-width:1}
+.energy-chart-axis{fill:#a0b493;font-size:11px;font-family:inherit;font-variant-numeric:tabular-nums}
+.energy-chart-zero-label{fill:#aac19a;font-size:12px}
+.energy-hour-bar{fill:#a4cd80}
+.energy-hour-partial{fill:#779b5f;stroke:#a4c686;stroke-width:.6;stroke-dasharray:2 2}
+.energy-hour-zero{stroke:#a4cd80;stroke-width:2}
+.energy-hourly-chart figcaption{font-size:11px;line-height:1.6;color:#9aae8f;text-align:center;margin-top:2px}
+.energy-chart-empty{display:flex;align-items:center;justify-content:center;min-height:130px;margin-top:15px;border:1px dashed #3c4e35;border-radius:5px;font-size:12px;line-height:1.6;color:#9fb092}
+.energy-hour-details{border-top:1px solid var(--line);margin-top:10px}
+.energy-hour-details summary,.energy-method summary{display:flex;align-items:center;justify-content:space-between;list-style:none;cursor:pointer;gap:10px;color:#b8cea7;font-size:12px;line-height:1.5;min-height:32px;padding:8px 0 0}
+.energy-hour-details summary::-webkit-details-marker,.energy-method summary::-webkit-details-marker{display:none}
+.energy-hour-details[open]>summary>svg,.energy-method[open]>summary>svg{transform:rotate(180deg)}
+.energy-hour-details summary:focus-visible,.energy-method summary:focus-visible{outline:2px solid var(--lime);outline-offset:3px;border-radius:2px}
+.energy-hour-details table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px;font-variant-numeric:tabular-nums;margin-top:7px}
+.energy-hour-details th,.energy-hour-details td{padding:6px 3px;text-align:right;border-bottom:1px solid #34412f;overflow-wrap:anywhere;font-weight:400;color:#beceb3}
+.energy-hour-details th:first-child{text-align:left;width:19%}
+.energy-hour-details th:last-child{width:30%}
+.energy-hour-details thead th{font-size:11px;color:#96ac87}
+.energy-read-error,.energy-recording-note{font-size:12px;line-height:1.7;color:#b6c8aa;margin:11px 0 0;padding:8px 10px;border:1px solid #4a5c43;background:#263225;border-radius:5px}
+.energy-day-detail>.energy-read-error{margin-top:12px;min-height:130px;display:flex;align-items:center;justify-content:center;text-align:center}
+.energy-calibration-link{display:inline-flex;align-items:center;color:var(--lime);text-decoration:underline;text-underline-offset:3px;margin-left:8px}
+.energy-recorded-at{display:flex;align-items:center;justify-content:space-between;gap:5px 15px;flex-wrap:wrap;margin-top:16px;font-size:12px;line-height:1.6;color:#9fb291}
+.energy-method{border-top:1px solid var(--line);margin-top:9px}
+.energy-method p{font-size:12px;line-height:1.8;color:#aabb9f;margin:8px 0 0;overflow-wrap:anywhere}
+.energy-skeleton{display:inline-block;background:#35472e;border-radius:3px;min-height:11px;width:65%;opacity:.55;animation:energy-pulse 1.4s ease-in-out infinite alternate}
+.energy-number-skeleton{width:85px;max-width:75%;height:26px;vertical-align:middle}
+.energy-calendar-value>.energy-skeleton{width:80%;height:10px;min-height:0}
+.energy-chart-loading{display:flex;align-items:flex-end;justify-content:space-around;height:135px;padding:18px 16px 12px;margin-top:12px;border-bottom:1px solid #35462e;gap:15px}
+.energy-chart-loading>span{width:17%;height:60%}
+.energy-chart-loading>span:nth-child(2){height:83%}.energy-chart-loading>span:nth-child(3){height:70%}.energy-chart-loading>span:nth-child(4){height:90%}
+@keyframes energy-pulse{to{opacity:.9}}
+@media(prefers-reduced-motion:reduce){.energy-skeleton{animation:none}}
+@media(max-width:1250px){.energy-main-grid{gap:16px;grid-template-columns:minmax(300px,1.2fr) minmax(240px,1fr)}.energy-day-detail{padding-left:15px}.energy-calendar-day{padding:6px 5px;min-height:57px}.energy-calendar-value{font-size:11px}.energy-summaries dd{font-size:27px}.energy-summaries{gap:14px}}
+@media(max-width:1050px){.energy-main-grid{grid-template-columns:1fr;gap:16px}.energy-day-detail{border-left:0;border-top:1px solid var(--line);padding:12px 0 0}.energy-calendar-day{min-height:61px;padding:7px 9px}.energy-calendar-value{font-size:12px}.energy-hourly-chart{max-width:620px}.energy-day-totals{max-width:620px}.energy-day-coverage{max-width:620px}}
+@media(max-width:760px){.energy-usage{margin-top:12px}.energy-heading h3{font-size:15px;gap:6px}.energy-heading p{font-size:11px}.energy-zone-label{font-size:11px}.energy-summaries{gap:10px;margin:14px 0;padding-bottom:13px}.energy-summaries>div{padding-right:9px}.energy-summaries dt{font-size:11px}.energy-summaries dd{font-size:23px;line-height:1.45}.energy-summaries small{display:block;font-size:11px;margin:0;line-height:1.4}.energy-summaries p{font-size:11px;line-height:1.5;margin-top:5px}.energy-month-navigation{margin-inline:2px;margin-bottom:4px}.energy-month-navigation h4{font-size:14px}.energy-month-buttons button{min-height:44px;min-width:44px}.energy-month-buttons .energy-current-month{padding-inline:7px}.energy-calendar{border-spacing:3px}.energy-calendar-day{padding:6px 5px;min-height:57px}.energy-calendar-date{font-size:12px}.energy-calendar-value{font-size:11px;margin-top:6px}.energy-calendar th{font-size:11px}.energy-calendar-legend{font-size:11px;gap:6px 10px}.energy-day-totals strong{font-size:25px}.energy-hour-details summary,.energy-method summary{min-height:44px;padding:11px 0 0}.energy-recorded-at{display:block;margin-top:12px;font-size:11px}.energy-recorded-at>span{display:block;margin-top:3px}.energy-number-skeleton{height:21px}.energy-day-heading h4{font-size:14px}.energy-day-status{font-size:11px}}
+@media(max-width:390px){.energy-heading{gap:7px}.energy-heading h3{font-size:14px}.energy-zone-label{font-size:10px}.energy-summaries{gap:7px}.energy-summaries>div{padding-right:6px}.energy-summaries dd{font-size:21px}.energy-summaries dt,.energy-summaries p{font-size:10px}.energy-calendar{border-spacing:2px}.energy-calendar-day{min-height:53px;padding:5px 3px}.energy-calendar-value{font-size:10px}.energy-calendar-date{font-size:11px}.energy-calendar-date small{font-size:9px}.energy-calendar-legend .energy-heat-legend{gap:3px}.energy-heat-legend i{width:7px;height:8px}.energy-calendar-legend{font-size:10px}.energy-day-totals strong{font-size:23px}.energy-summaries .energy-segment-badge{font-size:10px;padding-inline:3px}}
+@media(max-width:760px){.energy-calibration-link{min-height:44px}}

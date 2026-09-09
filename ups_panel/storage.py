@@ -12,6 +12,7 @@ import time
 from .power import finite_number
 from .battery_sessions import BatterySessions
 from .battery_capacity import BatteryCapacity
+from .energy_usage import EnergyUsage
 
 METRICS = ('battery_energy_estimate_w', 'ac_input_estimate_w', 'battery_charge_current_candidate_a', 'battery_discharge_current_candidate_a', 'battery_charge_power_candidate_w', 'battery_discharge_power_candidate_w', 'soc', 'power_w', 'dc_power_estimate_w', 'input_voltage', 'output_voltage', 'adapter_input_voltage_v', 'ups_output_voltage_v', 'current', 'battery_voltage', 'cell_delta_mv')
 CONTEXT_FIELDS = ('calibration_profile', 'calibration_revision', 'calibration_coefficients', 'ac_estimate_model', 'battery_estimate_basis',
@@ -72,6 +73,7 @@ class Store:
             self._migrate(db)
             self.battery_sessions = BatterySessions(db)
             self.battery_capacity = BatteryCapacity(db)
+            self.energy_usage = EnergyUsage(db)
         self.pending = {}
         self.dropped_buckets = 0
         self.last_ts = float(self.get_meta('last_ts') or 0)
@@ -196,6 +198,7 @@ class Store:
         sample = view.get('sample')
         self.battery_sessions.ingest(view)
         self.battery_capacity.ingest(view)
+        self.energy_usage.ingest(view)
         state = ('online:' + sample['mode']) if view['fresh'] else 'offline'
         if state != self.last_state:
             with self.connect() as db:
@@ -241,15 +244,33 @@ class Store:
             self._rollup_daily(db)
             self.battery_sessions.write(db)
             self.battery_capacity.write(db)
+            self.energy_usage.write(db)
             db.execute('INSERT OR REPLACE INTO meta VALUES(?,?)', ('last_ts', str(self.last_ts)))
         self.pending.clear()
         self.battery_sessions.committed()
         self.battery_capacity.committed()
+        self.energy_usage.committed()
         self.last_flush = time.monotonic()
 
     @synchronized
     def capacity_reference(self, view):
         return self.battery_capacity.snapshot(view, now=view.get('server_time'))
+
+    @synchronized
+    def usage_month(self, month, view):
+        view = view() if callable(view) else view
+        with self.connect() as db:
+            result = self.energy_usage.month(db, month, now=view['server_time'])
+        result['capture_fresh'] = bool(view.get('fresh'))
+        return result
+
+    @synchronized
+    def usage_day(self, date, view):
+        view = view() if callable(view) else view
+        with self.connect() as db:
+            result = self.energy_usage.day(db, date, now=view['server_time'])
+        result['capture_fresh'] = bool(view.get('fresh'))
+        return result
 
     @synchronized
     def reset_capacity_reference(self, view, expected_epoch_id):

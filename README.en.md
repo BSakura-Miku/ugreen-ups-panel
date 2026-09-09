@@ -4,9 +4,9 @@
 
 <p align="center"><img src="frontend/src/assets/us3000-logo.png" width="80" height="80" alt="US3000 Monitor logo" /></p>
 
-![US3000 v0.10.0 dashboard: compact overview, history chart and cell readings with demonstration data](docs/assets/dashboard-demo.png)
+![US3000 v0.12.0 dashboard: electricity calendar, history chart, capacity reference and cell readings with demonstration data](docs/assets/dashboard-demo.png)
 
-*v0.10.0 interface using DEMO data, with no real NAS telemetry or serial numbers. The UI and detailed documentation are primarily in Simplified Chinese.*
+*v0.12.0 interface using DEMO data, with no real NAS telemetry or serial numbers. The UI and detailed documentation are primarily in Simplified Chinese.*
 
 A UGREEN US3000 dashboard for power state, battery charge, cell voltages, and historical trends. A host collector uses Linux usbmon to observe existing UPS-driver traffic without writing to the UPS. Docker Compose runs the web dashboard.
 
@@ -17,6 +17,7 @@ A UGREEN US3000 dashboard for power state, battery charge, cell voltages, and hi
 - Compact power-state and metric rows, with prominent battery-power alerts and qualified cell-difference warnings.
 - Charge percentage, input/output voltage, pack voltage, four cell voltages, and cell voltage difference.
 - Up to one year of history, power and connection events, and CSV export with averages and extrema.
+- Estimated electricity use by Beijing calendar day, with a monthly calendar, coverage and hourly average power.
 - Mean and peak cell voltage difference, with the actual dates covered by recorded data.
 - Reference cell-voltage-difference levels after stable standby, with recent low-cell observations and guidance.
 - Individual battery-power records with start/end times, observed duration, start/end charge, occurrence counts, and net charge decrease.
@@ -35,6 +36,8 @@ Battery-power records begin with valid sampling after first enabling v0.5.0 or l
 In v0.7.0, reference levels require 30 minutes of continuous standby and 2 minutes in the current voltage-difference band. These are project guidance, not manufacturer health limits. Estimated discharge energy starts with valid samples observed by the new version and requires a configured battery gain; older records are not backfilled. Neither feature reports full battery capacity or SOH. See [battery observations](docs/battery-observation.md).
 
 Power fields still have protocol and measurement-location limitations. The optional empirical model is disabled by default (calibration profile `none`), so coefficients from the development unit are not applied. See [power calibration](docs/calibration.md).
+
+The v0.12.0 electricity card integrates estimated AC input power into a permanent ledger using Beijing time (UTC+08:00). It shows today, the selected month, averages over complete recorded days, and a calendar with daily coverage and hourly average power. Missing intervals stay unknown, battery discharge is not added to grid energy, and older power aggregates are not backfilled. See [electricity statistics](docs/energy-usage.md).
 
 The v0.11.0 relative-capacity card locks the current calibration stage and uses its first qualifying 90%→80% discharge interval as a 100% reference. Subsequent matched intervals are compared with this fixed baseline, using the median of the latest three accepted observations. It shows collection progress until evidence is available and never backfills older history. The percentage describes change relative to this reference, not factory SOH. See [relative capacity reference](docs/battery-capacity.md).
 
@@ -70,7 +73,7 @@ Successful installation starts the collector and enables it at boot.
 
 ## Update
 
-**v0.11.0 relative capacity observations only require a dashboard image update. Existing v0.9.1 collectors and updater services remain compatible.** See [storage and performance](docs/STORAGE.md) for retention and measured one-year queries.
+**v0.12.0 electricity statistics only require a dashboard image update. Existing v0.9.1 collectors and updater services remain compatible.** See [storage and performance](docs/STORAGE.md) for retention and measured one-year queries.
 
 **v0.9.1 optionally supports [collector updates from the dashboard](docs/collector-update.md).** Install the separate host updater once and add its local socket-directory mount. Then enter the management key on the diagnostics page to check, install and roll back compatible collector releases. An existing v0.8.0 collector is a supported starting point; dashboard images still update through Docker.
 
@@ -81,7 +84,7 @@ The following is the manual alternative. Complete diagnostics need a v0.8.0 or n
   set -eu
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT
-  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.11.0 -o "$tmp_dir/source.tar.gz"
+  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.12.0 -o "$tmp_dir/source.tar.gz"
   tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir"
   sudo sh "$tmp_dir/scripts/install-collector.sh" --data-dir /volume1/docker/ugreen-ups-panel/data
   sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml pull

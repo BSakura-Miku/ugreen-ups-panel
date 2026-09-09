@@ -163,7 +163,7 @@ def test_replay_with_legacy_device_metadata_never_confirms_physical_usb():
 def test_build_info_identifies_source_without_git_or_host_details(monkeypatch):
     monkeypatch.setenv('UPS_BUILD_REVISION', 'd' * 40)
     build = get_build_info()
-    assert build['version'] == '0.11.0' and build['revision'] == 'd' * 40
+    assert build['version'] == '0.12.0' and build['revision'] == 'd' * 40
     assert len(build['source_sha256']) == 64
     assert set(build) == {'version', 'revision', 'source_sha256'}
     monkeypatch.setenv('UPS_BUILD_REVISION', 'private@192.0.2.7')

@@ -4,9 +4,9 @@
 
 <p align="center"><img src="frontend/src/assets/us3000-logo.png" width="80" height="80" alt="US3000 Monitor Logo" /></p>
 
-![US3000 v0.10.0 面板预览：紧凑总览、历史趋势与电芯读数（演示数据）](docs/assets/dashboard-demo.png)
+![US3000 v0.12.0 面板预览：用电月历、历史趋势、容量参考与电芯读数（演示数据）](docs/assets/dashboard-demo.png)
 
-*v0.10.0 界面，使用 DEMO 演示数据，不包含实际 NAS 数据或序列号。*
+*v0.12.0 界面，使用 DEMO 演示数据，不包含实际 NAS 数据或序列号。*
 
 为 UGREEN US3000 提供供电状态、电量、电芯电压与历史趋势。宿主机采集器通过 Linux usbmon 只读观察已有 UPS 驱动的数据，Docker Compose 启动网页面板。
 
@@ -17,6 +17,7 @@
 - 查看外部供电、充电与电池供电状态。
 - 查看电量、输入/输出电压、电池组与四节电芯电压、电芯压差。
 - 查看最长一年的历史趋势、供电与连接事件，导出含均值和极值的 CSV。
+- 按北京时间累计估算用电量，通过月历查看每日耗电、记录完整度与小时平均功率。
 - 对照电芯压差的均值与峰值，查看实际记录的日期跨度。
 - 稳定待机后显示压差参考等级、近期偏低电芯与观察建议。
 - 查看每次电池供电的起止时间、观测时长、起止电量，以及次数和电量净下降。
@@ -34,6 +35,8 @@
 v0.7.0 的压差等级仅在连续待机 30 分钟、当前区间持续 2 分钟后确认，是项目参考提示，不是厂商健康标准。估算放电量从新版启用后的有效电池采样开始记录，需要已配置的电池倍率；旧记录不补算，无倍率时显示暂无估算。两项均不提供容量或 SOH 百分比，详见[电池观察说明](docs/battery-observation.md)。
 
 功率相关字段仍有协议解释和测点限制；可选经验模型默认关闭（校准配置 `none`），不套用开发样机系数，详见[功率校准](docs/calibration.md)。
+
+v0.12.0 的「用电统计」按北京时间（UTC+08:00）累计市电输入估算值，展示今日、所选月份、完整记录日的日均用电及月历。点击日期查看小时平均功率与记录覆盖率；缺采不补算，电池供电不重复计入市电电量。独立账本从升级后的有效记录开始永久保存，不从旧功率聚合反推用电量，详见[用电统计](docs/energy-usage.md)。
 
 v0.11.0 的「相对容量参考」在启用时固定当前校准阶段，以首个合格的 90%→80% 放电区间作为 100% 基线。后续匹配记录与该基线比较，最近三次取中位数；基线不会随时间自动移动。尚无合格记录时显示建立进度，旧历史不补算。这个百分比表示相对于本次参考的变化，不是出厂 SOH，详见[相对容量参考](docs/battery-capacity.md)。
 
@@ -114,7 +117,7 @@ services:
 
 ## 更新
 
-**v0.11.0 的相对容量参考只需更新面板镜像；已有 v0.9.1 采集器和更新服务继续兼容。**
+**v0.12.0 的用电统计只需更新面板镜像；已有 v0.9.1 采集器和更新服务继续兼容。**
 
 **v0.9.1 可选启用[网页采集器更新](docs/collector-update.md)。** 首次安装宿主更新服务并添加通信目录挂载后，可在「诊断与说明」检查新版、更新和回退；需要管理密钥。已有 v0.8.0 采集器可直接作为起点。面板镜像仍通过 Docker 更新。
 
@@ -125,7 +128,7 @@ services:
   set -eu
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT
-  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.11.0 -o "$tmp_dir/source.tar.gz"
+  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.12.0 -o "$tmp_dir/source.tar.gz"
   tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir"
   sudo sh "$tmp_dir/scripts/install-collector.sh" --data-dir /volume1/docker/ugreen-ups-panel/data
   sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml pull

@@ -426,6 +426,15 @@ assert capacity['baseline'] is None and capacity['comparison'] is None
 assert capacity['progress'] is None and capacity['recent'] == []
 assert capacity['criteria']['soc_start'] == 90 and capacity['criteria']['soc_end'] == 80
 assert capacity['temperature_known'] is False
+usage = get_json('/api/energy-usage')
+assert usage['schema'] == 1 and usage['capture_fresh']
+assert usage['timezone'] == 'Asia/Shanghai' and usage['utc_offset'] == '+08:00'
+assert usage['summary']['estimate_kwh'] is None and usage['summary']['complete_days'] == 0
+assert usage['today']['estimate_kwh'] is None and usage['today']['covered_sec'] == 0
+assert usage['tracking_started_at'] is not None and usage['storage_error'] is None
+usage_day = get_json('/api/energy-usage/day?date=' + usage['current_date'])
+assert usage_day['day']['estimate_kwh'] is None and len(usage_day['hours']) == 24
+assert all(hour['estimate_kwh'] is None for hour in usage_day['hours'])
 csv_bytes, _ = get('/api/export.csv?hours=1')
 csv_rows = list(csv.DictReader(io.StringIO(csv_bytes.decode('utf-8-sig'))))
 assert csv_rows and all(row['calibration_profile'] == 'none' for row in csv_rows)
@@ -463,7 +472,7 @@ def diagnostics():
     assert 'application/json' in headers.get('content-type', '')
     data = json.loads(body)
     assert data['schema'] == data['observation']['schema'] == 1
-    assert data['versions']['panel']['version'] == '0.11.0', 'Unexpected installed panel version'
+    assert data['versions']['panel']['version'] == '0.12.0', 'Unexpected installed panel version'
     assert data['versions']['collector'] is None, 'Missing collector version was invented'
     assert data['versions']['usb_device_version'] is None, 'Missing USB version was invented'
     assert data['observation']['window_sec'] == 900 and data['observation']['max_samples'] == 4096
@@ -495,7 +504,7 @@ def check_exports(data, private=False):
         assert headers.get('content-disposition', '').startswith('attachment;'), 'Export is not a download'
     export = json.loads(json_body)
     assert export['schema'] == 1 and export['format'] == 'us3000-diagnostics'
-    assert export['versions']['panel']['version'] == '0.11.0'
+    assert export['versions']['panel']['version'] == '0.12.0'
     assert export['privacy']['mode'] == 'allowlist'
     def check_keys(value):
         if isinstance(value, dict):

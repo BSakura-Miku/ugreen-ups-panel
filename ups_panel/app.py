@@ -1,6 +1,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 import csv
+from datetime import date as calendar_date
 import io
 import json
 import logging
@@ -355,6 +356,39 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
             return store().capacity_reference(load_snapshot(snapshot))
         except (sqlite3.Error, ValueError, TypeError, KeyError):
             raise HTTPException(503, '相对容量参考暂不可用')
+
+    @app.get('/api/energy-usage')
+    def energy_usage(month: str = Query(None, min_length=7, max_length=7,
+                                       pattern=r'^\d{4}-(0[1-9]|1[0-2])$')):
+        if month is not None:
+            try:
+                parsed = calendar_date.fromisoformat(month + '-01')
+                if not 1970 <= parsed.year <= 9998:
+                    raise ValueError('unsupported year')
+            except ValueError:
+                raise HTTPException(422, '月份无效') from None
+        try:
+            result = store().usage_month(month, lambda: load_snapshot(snapshot))
+            result['storage_error'] = state['storage_error']
+            return result
+        except (OSError, sqlite3.Error, ValueError, TypeError, KeyError):
+            raise HTTPException(503, '用电统计暂不可用') from None
+
+    @app.get('/api/energy-usage/day')
+    def energy_usage_day(date: str = Query(..., min_length=10, max_length=10,
+                                          pattern=r'^\d{4}-\d{2}-\d{2}$')):
+        try:
+            parsed = calendar_date.fromisoformat(date)
+            if not 1970 <= parsed.year <= 9998:
+                raise ValueError('unsupported year')
+        except ValueError:
+            raise HTTPException(422, '日期无效') from None
+        try:
+            result = store().usage_day(date, lambda: load_snapshot(snapshot))
+            result['storage_error'] = state['storage_error']
+            return result
+        except (OSError, sqlite3.Error, ValueError, TypeError, KeyError):
+            raise HTTPException(503, '当日用电统计暂不可用') from None
 
     @app.post('/api/battery-capacity/reset')
     async def reset_battery_capacity(request: Request):
