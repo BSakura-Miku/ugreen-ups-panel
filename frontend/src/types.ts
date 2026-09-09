@@ -132,13 +132,30 @@ export type CalibrationConfig = {
   coefficients: CalibrationCoefficients;
   revision: string;
 };
+export type CalibrationReportedConfig = CalibrationConfig | {
+  schema: null;
+  profile: string | null;
+  coefficients: null;
+  revision: string;
+  invalid_reason: string;
+};
+export type CalibrationReadiness = {
+  ready: boolean;
+  code: string | null;
+  message: string | null;
+  issues: { code: string; message: string }[];
+  can_save?: boolean;
+};
 export type CalibrationState = {
   schema: 1;
   defaults: CalibrationLegacyCoefficients;
   supported_config_schemas?: number[];
-  desired: CalibrationConfig;
-  active: CalibrationConfig | null;
+  desired: CalibrationReportedConfig;
+  active: CalibrationReportedConfig | null;
   collector_ready: boolean;
+  readiness?: CalibrationReadiness;
+  edit_revision?: string;
+  configuration_problem?: { source: 'desired' | 'active' | 'sample'; code: string; profile?: string } | null;
   pending: boolean;
   error: string | null;
 };
@@ -179,6 +196,7 @@ export type Sample = {
 };
 export type LiveView = {
   cell_balance?: CellBalanceReport | null;
+  calibration_validation?: { valid: boolean; reason: string | null; profile?: string; message?: string | null };
   calibration?: { config: CalibrationConfig | null; configurable: boolean; error: string | null };
   fresh: boolean;
   source: string;
@@ -289,6 +307,10 @@ export type CollectorUpdateStatus = {
   updater_version: string | null;
   updater_schema: 1;
   current: { version: string; revision: string | null; source_sha256: string | null } | null;
+  runtime?: DiagnosticBuild | null;
+  source_status?: 'verified' | 'unverified' | 'modified' | 'unreadable' | 'unknown';
+  source_error?: { code: string; message: string } | null;
+  preflight?: { ready: boolean; code: string | null; target_verified: boolean };
   latest: {
     version: string;
     tag: string;

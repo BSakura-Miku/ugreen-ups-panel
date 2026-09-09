@@ -14,7 +14,7 @@ import re
 import time
 from uuid import uuid4
 
-from .battery_energy import device_identity
+from .battery_energy import calibration_rejected, device_identity
 from .calibration import CalibrationError, normalize_config
 from .power import finite_number
 
@@ -78,6 +78,8 @@ def _start(day):
 
 def _basis(view):
     """Validate the collector's AC model provenance, independently of battery_gain."""
+    if calibration_rejected(view):
+        return None, None, 'invalid_basis'
     sample = view['sample']
     source = view.get('source')
     device = device_identity(view.get('device'))
@@ -200,6 +202,10 @@ class EnergyUsage:
         if not isinstance(view, dict) or view.get('fresh') is not True or not isinstance(view.get('sample'), dict):
             self._break('stale')
             return
+        if calibration_rejected(view):
+            # Do this before timestamp deduplication: rejection can arrive for
+            # the same raw sample after the active configuration changes.
+            self._break('invalid_basis')
         sample = view['sample']
         ts = sample.get('timestamp')
         if not _timestamp(ts):

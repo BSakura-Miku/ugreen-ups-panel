@@ -62,6 +62,31 @@ def result(model, last):
     return model.snapshot(last, now=last['sample']['timestamp'])
 
 
+@pytest.mark.parametrize('duplicate', [False, True])
+@pytest.mark.parametrize('restart', [False, True])
+def test_explicit_calibration_rejection_abandons_current_window_not_reference(db, duplicate, restart):
+    model = BatteryCapacity(db)
+    window(model)
+    baseline = copy.deepcopy(model.state['baseline'])
+    for item in (view(396, mode='online'), view(398), view(400, soc=90), view(402, soc=90)):
+        model.ingest(item)
+    assert model.active and model.active['duration_sec'] == 2
+    rejected = view(402 if duplicate else 403, soc=90)
+    rejected['calibration_validation'] = {'valid': False, 'reason': 'config_mismatch'}
+    model.ingest(rejected)
+    assert model.active is None and model.previous is None and model.blocked
+    assert model.state['baseline'] == baseline and model.state['reason'] == 'invalid_basis'
+    if restart:
+        commit(model, db)
+        model = BatteryCapacity(db)
+    model.ingest(view(404, soc=90))
+    assert model.active is None and model.previous is None and model.blocked
+    assert model.state['baseline'] == baseline
+    # A new observed external-power-separated cycle is still eligible.
+    window(model, start=500)
+    assert model.state['baseline'] == baseline and model.state['recent'][-1]['accepted']
+
+
 def test_stage_is_fixed_before_first_real_window_and_never_uses_nominal_capacity(db):
     model = BatteryCapacity(db)
     initial = view(10, mode='online')

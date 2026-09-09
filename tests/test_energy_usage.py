@@ -63,6 +63,29 @@ def summary(model, db, now, date='2026-09-09'):
     return model.day(db, date, now)['day']
 
 
+@pytest.mark.parametrize('duplicate', [False, True])
+@pytest.mark.parametrize('restart', [False, True])
+def test_explicit_calibration_rejection_breaks_ac_anchor_even_on_duplicate(db, duplicate, restart):
+    model = EnergyUsage(db)
+    start = timestamp()
+    model.ingest(view(start))
+    model.ingest(view(start + 2))
+    rejected = view(start + (2 if duplicate else 3), power=999)
+    rejected['calibration_validation'] = {'valid': False, 'reason': 'config_mismatch'}
+    model.ingest(rejected)
+    assert model.state['anchor'] is None and model.state['reason'] == 'invalid_basis'
+    assert summary(model, db, start + 3)['covered_sec'] == 2
+    if restart:
+        commit(model, db, mirror_cursor=True)
+        model = EnergyUsage(db)
+        assert model.state['anchor'] is None
+    model.ingest(view(start + 4))
+    model.ingest(view(start + 6))
+    result = summary(model, db, start + 6)
+    assert result['estimate_kwh'] == pytest.approx(100 * 4 / 3600000)
+    assert result['covered_sec'] == 4
+
+
 def test_constant_power_real_hour_energy_and_same_day_month_ledger(db):
     model = EnergyUsage(db)
     start = timestamp()

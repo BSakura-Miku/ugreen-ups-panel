@@ -63,7 +63,7 @@ cd ugreen-ups-panel
 sudo sh scripts/install-collector.sh && docker compose up -d
 ```
 
-The installer sets up the host collector and prepares the data directory. Compose automatically pulls the [Docker Hub image](https://hub.docker.com/r/bsakuramiku/ugreen-ups-panel); no local build is required.
+The installer sets up the host collector and prepares the data directory. It verifies fresh telemetry, the source identity of the running collector, and access to the intended calibration configuration. New collectors also report the configuration target identity; older collectors can only confirm matching content and retain an explicit unverified-path notice. Compose automatically pulls the [Docker Hub image](https://hub.docker.com/r/bsakuramiku/ugreen-ups-panel); no local build is required.
 
 The default [`docker-compose.yaml`](docker-compose.yaml) sets `panel.user` to `"0:0"` for compatibility with data-directory permissions on some NAS systems. See [container user and data-directory permissions](#container-user-and-data-directory-permissions) for the reason, implications, and non-root alternative.
 
@@ -73,9 +73,15 @@ Successful installation starts the collector and enables it at boot.
 
 ## Update
 
+**v0.12.1 improves calibration, installation and update reliability.** Update the dashboard and collector for isolated calibration failures, actionable save-state messages and configuration-target checks. The new host preflight checks also require updating the host updater service itself, as described below.
+
 **v0.12.0 electricity statistics only require a dashboard image update. Existing v0.9.1 collectors and updater services remain compatible.** See [storage and performance](docs/STORAGE.md) for retention and measured one-year queries.
 
 **v0.9.1 optionally supports [collector updates from the dashboard](docs/collector-update.md).** Install the separate host updater once and add its local socket-directory mount. Then enter the management key on the diagnostics page to check, install and roll back compatible collector releases. An existing v0.8.0 collector is a supported starting point; dashboard images still update through Docker.
+
+If web updates are already enabled, follow the [update and verification steps](docs/collector-update.md#日常操作) without repeating the initial setup. “检查更新” only checks releases; choose “查看并更新” and then “确认安装此版本” to install. Dashboard, collector, and updater service versions do not need to match.
+
+Web updates replace only the collector. To enable the new local-source checks, runtime-identity checks and calibration preflight, [update the host updater service itself](docs/collector-update.md#更新宿主更新服务) from the command line. Older updater services remain compatible, but the page explicitly reports that full preflight is unavailable. After installation, check installed source, the running version, calibration readiness and history writes separately.
 
 The following is the manual alternative. Complete diagnostics need a v0.8.0 or newer host collector. Follow the [backup instructions](docs/architecture.md#备份与维护) first. Replace the paths below with your existing deployment path and keep the original Compose project name; add `-p original-project-name` consistently if you previously set a custom name. Temporary source files are removed afterward; existing `data` and `docker-compose.yaml` are retained. Older collectors remain compatible with existing telemetry; new environment, version, and some system fields display as unknown.
 
@@ -84,7 +90,7 @@ The following is the manual alternative. Complete diagnostics need a v0.8.0 or n
   set -eu
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT
-  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.12.0 -o "$tmp_dir/source.tar.gz"
+  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.12.1 -o "$tmp_dir/source.tar.gz"
   tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir"
   sudo sh "$tmp_dir/scripts/install-collector.sh" --data-dir /volume1/docker/ugreen-ups-panel/data
   sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml pull
@@ -105,6 +111,8 @@ Open **功率校准** to view the active configuration, coefficients, and formul
 Each window needs at least 12 distinct readings. Missing data, mode changes, or more than 10% variation in relevant raw readings require another window. Save the calculated settings and wait for collector confirmation. AC readings are entered manually; the assistant does not connect to HA, switch the plug, or initiate a power interruption.
 
 The default remains `none`; `local-19v-v1` and `custom` are also available. The development preset retains its original 19 V scope and cannot be used for 12 V. Custom AC estimates require input within ±1 V of the selected voltage and use 8-second smoothing. They always remain independently unverified. See [power calibration](docs/calibration.md) for coefficient limits, partial configurations, and model evidence.
+
+For a 12 V adapter, select `custom` and confirm `12 V`; no extra profile name is needed. A disabled save button explains calibration-path, file-access, compatibility or stale-sample issues. Unknown configurations do not reuse coefficients or assume 19 V. Invalid calibration pauses the affected power estimates and energy accumulation while valid raw telemetry, including charge percentage and voltages, continues to display and record.
 
 ## Configuration and data
 

@@ -35,10 +35,11 @@ def panel(tmp_path):
 
 
 def request_for(client, profile='custom', coefficients=None):
+    status = client.get('/api/calibration').json()
     return {'profile': profile,
             'coefficients': coefficients if coefficients is not None else
                 {'base_gain': 1.5, 'charge_gain': 0, 'battery_gain': 1.1} if profile == 'custom' else None,
-            'expected_revision': client.get('/api/calibration').json()['desired']['revision']}
+            'expected_revision': status.get('edit_revision') or status['desired']['revision']}
 
 
 def test_shows_exact_active_coefficients_and_confirms_collector_application(panel):
@@ -152,13 +153,16 @@ def test_nonfinite_and_oversized_requests_are_rejected(panel):
     assert not path.exists()
 
 
-def test_snapshot_rejects_coefficients_that_do_not_match_revision(tmp_path):
+def test_snapshot_disables_bad_coefficients_without_losing_raw_telemetry(tmp_path):
     path = tmp_path / 'latest.json'
     snapshot = publish(path, default_config('local-19v-v1'))
     assert load_snapshot(path)['fresh']
     snapshot['sample']['calibration_coefficients']['base_gain'] = 2
     atomic_json(path, snapshot)
-    assert not load_snapshot(path)['fresh']
+    result = load_snapshot(path)
+    assert result['fresh'] and result['sample']['soc'] == snapshot['sample']['soc']
+    assert not result['calibration_validation']['valid']
+    assert result['sample']['ac_input_estimate_w'] is None
 
 
 def test_collector_config_without_matching_new_sample_is_not_confirmed(panel):

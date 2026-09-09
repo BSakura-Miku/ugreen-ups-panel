@@ -33,6 +33,7 @@ def view(ts):
         estimator.update(sample)
     assert sample['ac_input_estimate_w'] == 60
     return {'schema': 1, 'source': 'replay', 'device': {'serial': 'DEMO-ENERGY-API'},
+            'calibration': {'config': config, 'configurable': True, 'error': None},
             'heartbeat': ts, 'server_time': ts, 'fresh': True, 'sample': sample, 'nut': {}}
 
 

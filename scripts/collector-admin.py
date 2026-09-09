@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Install/restore only this project's passive collector; never manage NUT."""
 import argparse
+import ast
 from contextlib import contextmanager
 import fcntl
 import hashlib
@@ -14,8 +15,12 @@ import shlex
 import signal
 import stat
 import subprocess
+import sys
 import tempfile
 import time
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from ups_panel.collector_health import calibration_readiness, environment_config
 
 BASE = Path('/opt/ugreen-ups-panel')
 CONFIGS = {
@@ -59,21 +64,35 @@ def termination_recovery():
         signal.signal(signal.SIGTERM, previous)
 
 
-def current_source_sha256():
-    package = BASE / 'current' / 'ups_panel'
+def source_build(directory):
+    package = Path(directory) / 'ups_panel'
     if package.is_symlink() or not package.is_dir():
         raise ValueError('Current collector source is unavailable.')
     paths = sorted(package.glob('*.py'))
     if not paths:
         raise ValueError('Current collector source is unavailable.')
     digest = hashlib.sha256()
+    build_version = None
     for path in paths:
         if path.is_symlink() or not path.is_file():
             raise ValueError('Current collector source contains an unsafe file.')
         digest.update(path.name.encode('utf-8') + b'\0')
         digest.update(path.read_bytes())
         digest.update(b'\0')
-    return digest.hexdigest()
+        if path.name == 'build_info.py':
+            try:
+                for node in ast.parse(path.read_text()).body:
+                    if isinstance(node, ast.Assign) and any(isinstance(item, ast.Name) and item.id == 'VERSION' for item in node.targets):
+                        build_version = ast.literal_eval(node.value)
+            except (SyntaxError, ValueError, TypeError, UnicodeError):
+                raise ValueError('Collector source has invalid version metadata.') from None
+    if not isinstance(build_version, str):
+        raise ValueError('Current collector version is unavailable.')
+    return {'version': build_version, 'source_sha256': digest.hexdigest()}
+
+
+def current_source_sha256():
+    return source_build(BASE / 'current')['source_sha256']
 
 
 def command(*args, check=True):
@@ -132,8 +151,10 @@ def restore_state(directory):
     return state
 
 
-def validate_fresh(started, timeout=20):
+def validate_fresh(started, timeout=20, *, expected_build=None, calibration_path=None,
+                   calibration_profile='none', require_target=False):
     deadline = time.monotonic() + timeout
+    reason = None
     while time.monotonic() < deadline:
         try:
             with SNAPSHOT.open('rb') as source:
@@ -151,11 +172,22 @@ def validate_fresh(started, timeout=20):
                 return (isinstance(value, (int, float)) and not isinstance(value, bool)
                         and math.isfinite(value) and started <= value <= now and now - value < 10)
             if fresh(timestamp) and fresh(heartbeat):
+                if expected_build is not None:
+                    collector = snapshot.get('collector')
+                    build = collector.get('build') if isinstance(collector, dict) else None
+                    if not isinstance(build, dict) or any(build.get(key) != expected_build[key] for key in ('version', 'source_sha256')):
+                        reason = 'Running collector does not match the installed source version and fingerprint.'
+                        raise ValueError(reason)
+                if calibration_path is not None or require_target:
+                    health = calibration_readiness(snapshot, calibration_path, calibration_profile, require_target=require_target)
+                    if not health['ready']:
+                        reason = 'Collector configuration check failed: ' + health['code'] + '. Check UPS_CALIBRATION_CONFIG, the data directory and systemd overrides.'
+                        raise ValueError(reason)
                 return
         except (OSError, ValueError, KeyError, TypeError, AttributeError, OverflowError, RecursionError):
             pass
         time.sleep(1)
-    raise RuntimeError(f'No fresh UPS telemetry within {timeout} seconds; check USB connection and the existing UPS driver.')
+    raise RuntimeError(reason or f'No fresh UPS telemetry within {timeout} seconds; check USB connection and the existing UPS driver.')
 
 
 def write_environment(profile, calibration_path):
@@ -198,12 +230,16 @@ def installation_data_directory(source, data_dir):
     else:
         chosen = source / 'data'
         env = CONFIGS['env']
+        found = False
         for line in env.read_text().splitlines() if env.exists() else []:
             if line.strip().startswith('UPS_CALIBRATION_CONFIG='):
                 values = shlex.split(line.split('=', 1)[1], comments=False)
                 if len(values) != 1 or Path(values[0]).name != 'calibration.json':
                     raise ValueError('Invalid existing calibration path; specify --data-dir explicitly.')
                 chosen = Path(values[0]).parent
+                found = True
+        if not found and (BASE / 'current').exists():
+            raise ValueError('Existing collector has no saved calibration path; specify --data-dir for the existing dashboard data directory.')
     if not chosen.is_absolute() or any(ord(c) < 32 for c in str(chosen)):
         raise ValueError('Data directory must be an absolute path without control characters.')
     return chosen
@@ -265,6 +301,9 @@ def install(source, profile=None, data_dir=None, preserve_host_config=False):
     if any(path.is_symlink() or not path.is_file() for path in python_sources):
         raise ValueError('Collector source must contain only regular Python files.')
     metadata = release_metadata(source)
+    build = source_build(source)
+    if metadata is not None and any(json.loads(metadata)[key] != build[key] for key in ('version', 'source_sha256')):
+        raise ValueError('Collector release metadata does not match its source identity.')
     license_content = source_license(source, required=metadata is not None)
     for filename in ('__init__.py', 'collector.py', 'protocol.py', 'power.py', 'calibration.py', 'usbmon.py', 'build_info.py', 'doctor.py'):
         if not (source / 'ups_panel' / filename).is_file():
@@ -279,11 +318,16 @@ def install(source, profile=None, data_dir=None, preserve_host_config=False):
     if preserve_host_config:
         if command('systemctl', 'is-active', '--quiet', UNIT, check=False).returncode != 0:
             raise ValueError('Preserving host configuration requires an active collector.')
-        validate_fresh(time.time() - 10, timeout=1)
+        calibration_path, existing_profile = environment_config(CONFIGS['env'])
+        if not calibration_path:
+            raise ValueError('calibration_unconfigured: set UPS_CALIBRATION_CONFIG using the collector installer and the existing --data-dir before a web update.')
+        validate_fresh(time.time() - 10, timeout=1, expected_build=source_build(BASE / 'current'),
+                       calibration_path=calibration_path, calibration_profile=existing_profile)
     command('/usr/bin/python3', '-c', 'import ctypes, select, sqlite3; import sys; assert sys.version_info >= (3, 10), "Python 3.10+ required"')
     if not preserve_host_config:
         command('/sbin/modinfo', 'usbmon')
         data = prepare_data_directory(source, installation_data_directory(source, data_dir))
+        calibration_path = data / 'calibration.json'
     (BASE / 'releases').mkdir(parents=True, exist_ok=True)
     release = Path(tempfile.mkdtemp(prefix=time.strftime('%Y%m%d-%H%M%S-'), dir=BASE / 'releases'))
     release.chmod(0o755)
@@ -322,7 +366,9 @@ def install(source, profile=None, data_dir=None, preserve_host_config=False):
         # Only a report completed after restart qualifies. A last report from
         # the previous process must not make a broken release appear healthy.
         print('{"stage":"validating"}', flush=True)
-        validate_fresh(time.time())
+        _, effective_profile = environment_config(CONFIGS['env'])
+        validate_fresh(time.time(), expected_build=source_build(release), calibration_path=calibration_path,
+                       calibration_profile=effective_profile, require_target=(package_destination / 'config_target.py').is_file())
         if not preserve_host_config:
             command('systemctl', 'enable', UNIT)
         if before['current']:
@@ -336,7 +382,9 @@ def install(source, profile=None, data_dir=None, preserve_host_config=False):
         print('{"outcome":"restored"}', flush=True)
         print('Installation failed. Previous collector code, configuration and service state restored.')
         raise
-    print(f'Installed {release}. Fresh UPS telemetry verified.')
+    detail = ('calibration target verified' if (package_destination / 'config_target.py').is_file()
+              else 'calibration content matched; legacy collector cannot confirm target identity')
+    print(f'Installed {release}. Runtime source identity and fresh UPS telemetry verified; {detail}.')
 
 
 def rollback():
@@ -354,7 +402,10 @@ def rollback():
     try:
         restored = restore_state(backup)
         if restored['active']:
-            validate_fresh(time.time())
+            calibration_path, calibration_profile = environment_config(CONFIGS['env'])
+            validate_fresh(time.time(), expected_build=source_build(previous), calibration_path=calibration_path,
+                           calibration_profile=calibration_profile,
+                           require_target=(previous / 'ups_panel' / 'config_target.py').is_file())
         recovered = True
     except BaseException as rollback_error:
         try:

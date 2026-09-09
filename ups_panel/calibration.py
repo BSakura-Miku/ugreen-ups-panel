@@ -4,6 +4,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import secrets
 import stat
 
@@ -21,6 +22,10 @@ PROFILES = (*PRESET_PROFILES, 'custom')
 
 class CalibrationError(ValueError):
     """A calibration configuration could not be validated, read, or saved."""
+
+    def __init__(self, message, code='invalid_config'):
+        super().__init__(message)
+        self.code = code
 
 
 def _coefficients(value, *, allow_unconfigured=False):
@@ -58,10 +63,10 @@ def normalize_config(data):
     if set(data) - allowed:
         raise CalibrationError('校准配置包含未知字段或不是对象')
     if type(schema) is not int or schema not in SUPPORTED_CONFIG_SCHEMAS:
-        raise CalibrationError('不支持的校准配置版本')
+        raise CalibrationError('不支持的校准配置版本', 'unsupported_schema')
     profile = data.get('profile')
     if not isinstance(profile, str) or profile not in PROFILES:
-        raise CalibrationError('未知校准配置')
+        raise CalibrationError('未知校准配置', 'unsupported_profile')
     supplied = data.get('coefficients')
     if schema == 2:
         if profile != 'custom':
@@ -111,31 +116,73 @@ def _reject_constant(_):
     raise CalibrationError('校准配置包含非有限数值')
 
 
-def load_config(path):
-    """Read at most 4 KiB from a regular, non-symlink file, or return None if absent."""
+def _read_config_bytes(path):
+    """Read one bounded file image, without following a substituted file link."""
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
         return None
     except OSError as exc:
-        raise CalibrationError('校准配置不可读取或不是普通文件') from exc
+        raise CalibrationError('校准配置不可读取或不是普通文件', 'file_unreadable') from exc
     try:
         with os.fdopen(fd, 'rb') as source:
             metadata = os.fstat(source.fileno())
             if not stat.S_ISREG(metadata.st_mode):
-                raise CalibrationError('校准配置必须为普通文件')
+                raise CalibrationError('校准配置必须为普通文件', 'file_unreadable')
             if metadata.st_size > MAX_CONFIG_BYTES:
-                raise CalibrationError('校准配置超过 4 KiB')
+                raise CalibrationError('校准配置超过 4 KiB', 'file_invalid')
             encoded = source.read(MAX_CONFIG_BYTES + 1)
         if len(encoded) > MAX_CONFIG_BYTES:
-            raise CalibrationError('校准配置超过 4 KiB')
-        data = json.loads(encoded.decode('utf-8'), object_pairs_hook=_unique_object,
-                          parse_constant=_reject_constant)
-        return normalize_config(data)
+            raise CalibrationError('校准配置超过 4 KiB', 'file_invalid')
+        return encoded
     except CalibrationError:
         raise
-    except (OSError, UnicodeError, ValueError, RecursionError) as exc:
-        raise CalibrationError('校准配置不是有效 JSON') from exc
+    except OSError as exc:
+        raise CalibrationError('校准配置不可读取或不是普通文件', 'file_unreadable') from exc
+
+
+def _config_document(encoded):
+    try:
+        return json.loads(encoded.decode('utf-8'), object_pairs_hook=_unique_object,
+                          parse_constant=_reject_constant)
+    except (UnicodeError, ValueError, RecursionError):
+        raise CalibrationError('校准配置不是有效 JSON', 'file_invalid') from None
+
+
+def load_config(path):
+    """Return a canonical configuration, or None if its file does not yet exist."""
+    encoded = _read_config_bytes(path)
+    return normalize_config(_config_document(encoded)) if encoded is not None else None
+
+
+def inspect_config(path):
+    """Inspect a bad file without exposing its contents or losing edit conflicts.
+
+    Valid files keep their canonical revision. A bad but readable file receives
+    a content token so an explicit repair cannot overwrite a newer edit.
+    """
+    result = {'config': None, 'state': 'missing', 'code': None,
+              'edit_revision': None, 'profile': None, 'schema': None}
+    try:
+        encoded = _read_config_bytes(path)
+    except CalibrationError as exc:
+        return dict(result, state='unreadable', code=exc.code)
+    if encoded is None:
+        return result
+    result['edit_revision'] = hashlib.sha256(b'invalid-calibration-v1\0' + encoded).hexdigest()
+    try:
+        document = _config_document(encoded)
+        if isinstance(document, dict):
+            profile = document.get('profile')
+            if isinstance(profile, str) and re.fullmatch(r'[A-Za-z0-9_-]{1,64}', profile):
+                result['profile'] = profile
+            schema = document.get('schema')
+            if type(schema) is int and 0 <= schema <= 99:
+                result['schema'] = schema
+        config = normalize_config(document)
+        return dict(result, config=config, state='loaded', edit_revision=config['revision'])
+    except CalibrationError as exc:
+        return dict(result, state='invalid', code=exc.code)
 
 
 def save_config(path, config):
@@ -170,7 +217,7 @@ def save_config(path, config):
     except CalibrationError:
         raise
     except OSError as exc:
-        raise CalibrationError('校准配置保存失败') from exc
+        raise CalibrationError('校准配置保存失败', 'save_failed') from exc
     finally:
         if directory_fd is not None:
             if temporary is not None:

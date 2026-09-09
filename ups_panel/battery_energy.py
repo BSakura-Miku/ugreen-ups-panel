@@ -14,6 +14,12 @@ MAX_INTERVAL_SEC = 5
 TABLE = 'battery_session_energy'
 
 
+def calibration_rejected(view):
+    """Explicit ingestion rejection wins over any residual sample metadata."""
+    validation = view.get('calibration_validation') if isinstance(view, dict) else None
+    return isinstance(validation, dict) and validation.get('valid') is False
+
+
 def _soc(sample):
     value = sample.get('soc')
     return value if finite_number(value) and 0 <= value <= 100 else None
@@ -53,6 +59,8 @@ def evidence(view):
     for key in ('decoder_version', 'formula_version'):
         if type(identity[key]) is not int or identity[key] < 1:
             identity[key] = None
+    if calibration_rejected(view):
+        return identity, None, 'invalid_basis'
     # A disabled model never acquires a default coefficient or a numeric estimate.
     reason = 'not_configured' if sample.get('calibration_profile') == 'none' else 'invalid_basis'
     config = {'schema': sample.get('calibration_schema', 1),

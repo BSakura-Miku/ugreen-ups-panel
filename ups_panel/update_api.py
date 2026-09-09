@@ -8,16 +8,47 @@ from fastapi import HTTPException, Request
 from .update_client import KEY_PATTERN, UpdateClient, UpdateError, build_value
 
 
-def install_update_routes(app, read_snapshot, client=None):
+def install_update_routes(app, read_snapshot, client=None, *, calibration_status=None):
     client = client or UpdateClient()
+
+    def panel_preflight_code():
+        if calibration_status is None:
+            return None
+        try:
+            value = calibration_status()
+        except (OSError, ValueError, TypeError):
+            return 'calibration_unreadable'
+        readiness = value.get('readiness') if isinstance(value, dict) else None
+        if not isinstance(readiness, dict):
+            return None
+        if readiness.get('target') == 'mismatched':
+            return 'calibration_target_mismatch'
+        if readiness.get('target') == 'unavailable':
+            return 'calibration_unreadable'
+        # Older collectors cannot prove target identity. They must remain able
+        # to upgrade; reject only the definite wiring/file failures listed here.
+        codes = {readiness.get('code')} if isinstance(readiness.get('code'), str) else set()
+        issues = readiness.get('issues')
+        if isinstance(issues, list):
+            codes.update(item['code'] for item in issues
+                         if isinstance(item, dict) and isinstance(item.get('code'), str))
+        for code, public_code in (('path_unconfigured', 'calibration_unconfigured'),
+                                  ('file_unreadable', 'calibration_unreadable'),
+                                  ('unsupported_schema', 'calibration_incompatible')):
+            if code in codes:
+                return public_code
+        return None
 
     @app.get('/api/collector-update')
     async def updater_status():
         status = await asyncio.to_thread(client.request)
-        if status['current'] is None:
+        if status.get('runtime') is None:
             collector = read_snapshot().get('collector')
             if isinstance(collector, dict):
-                status['current'] = build_value(collector.get('build'))
+                status['runtime'] = build_value(collector.get('build'))
+        code = await asyncio.to_thread(panel_preflight_code)
+        if code:
+            status['preflight'] = {'ready': False, 'code': code, 'target_verified': False}
         return status
 
     @app.post('/api/collector-update/{action}', status_code=202)
@@ -57,6 +88,10 @@ def install_update_routes(app, read_snapshot, client=None):
                 raise ValueError
         except (ValueError, TypeError, RecursionError):
             reject('invalid_request', 400)
+        if action != 'check':
+            code = await asyncio.to_thread(panel_preflight_code)
+            if code:
+                reject(code, 409)
         try:
             return await asyncio.to_thread(client.request, action, payload, key)
         except UpdateError as exc:
@@ -64,5 +99,9 @@ def install_update_routes(app, read_snapshot, client=None):
             status = (401 if code == 'unauthorized' else 429 if code == 'rate_limited'
                       else 503 if code in ('service_unavailable', 'incompatible_service', 'internal_error')
                       else 409 if code in ('busy', 'check_required', 'stale_release', 'stale_current',
-                                           'no_update', 'rollback_unavailable', 'collector_unavailable') else 400)
+                                           'no_update', 'rollback_unavailable', 'collector_unavailable',
+                                           'source_modified', 'source_unreadable', 'runtime_mismatch', 'calibration_unconfigured',
+                                           'calibration_unreadable', 'calibration_incompatible', 'calibration_mismatch',
+                                           'calibration_target_unverified', 'calibration_target_mismatch',
+                                           'configuration_changed') else 400)
             raise HTTPException(status, exc.public()) from None

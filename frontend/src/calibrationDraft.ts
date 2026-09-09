@@ -1,11 +1,13 @@
-import type { CalibrationCoefficients, CalibrationConfig, CalibrationLegacyCoefficients, CalibrationProfile, CalibrationVoltage } from './types';
+import type { CalibrationCoefficients, CalibrationConfig, CalibrationLegacyCoefficients, CalibrationProfile, CalibrationReportedConfig, CalibrationState, CalibrationVoltage } from './types';
+import { calibrationEditRevision, parseCalibrationConfig } from './calibrationState.ts';
 
 export type CoefficientKey = keyof CalibrationCoefficients;
 export type CoefficientSource = 'empty' | 'existing' | 'legacy' | 'manual' | 'assistant' | 'preset';
 export type CoefficientValues = Record<CoefficientKey, string>;
 export type CalibrationDraft = {
   schema: 1 | 2;
-  profile: CalibrationProfile;
+  profile: CalibrationProfile | null;
+  configurationIssue?: string;
   voltage: CalibrationVoltage | null;
   voltageConfirmed: boolean;
   values: CoefficientValues;
@@ -21,9 +23,11 @@ export function formatCoefficient(value: number | null | undefined): string {
   const rounded = Number(value.toFixed(4));
   return rounded === 0 && value !== 0 ? value.toExponential(3).replace(/\.?0+e/, 'e') : String(rounded);
 }
-export function createDraft(config: CalibrationConfig): CalibrationDraft {
+export function createDraft(value: CalibrationReportedConfig): CalibrationDraft {
+  const config = parseCalibrationConfig(value);
   const values = emptyValues(), displayValues = emptyValues();
   const sources: CalibrationDraft['sources'] = { base_gain: 'empty', charge_gain: 'empty', battery_gain: 'empty' };
+  if (config.schema === null) return { schema: 1, profile: null, voltage: null, voltageConfirmed: false, values, displayValues, sources, revision: config.revision, configurationIssue: config.invalid_reason };
   for (const key of keys) {
     const value = config.coefficients?.[key];
     if (typeof value === 'number') {
@@ -33,6 +37,15 @@ export function createDraft(config: CalibrationConfig): CalibrationDraft {
   }
   return { schema: config.schema, profile: config.profile, voltage: config.schema === 2 ? config.ac_voltage_nominal_v : null,
     voltageConfirmed: config.schema === 2, values, displayValues, sources, revision: config.revision };
+}
+export function createStateDraft(data: CalibrationState): CalibrationDraft {
+  const config = data.configuration_problem?.source === 'desired'
+    ? { schema: null, profile: data.configuration_problem.profile ?? null, coefficients: null, revision: calibrationEditRevision(data), invalid_reason: '待保存配置无效，请主动选择校准方式并重新填写。' } as const : data.desired;
+  return { ...createDraft(config), revision: calibrationEditRevision(data) };
+}
+export function chooseProfile(draft: CalibrationDraft, profile: string): CalibrationDraft {
+  if (profile !== 'none' && profile !== 'custom' && profile !== 'local-19v-v1') return draft;
+  return { ...draft, profile, configurationIssue: undefined };
 }
 function clearAc(draft: CalibrationDraft): CalibrationDraft {
   return { ...draft, values: { ...draft.values, base_gain: '', charge_gain: '' }, displayValues: { ...draft.displayValues, base_gain: '', charge_gain: '' }, sources: { ...draft.sources, base_gain: 'empty', charge_gain: 'empty' } };
@@ -81,7 +94,9 @@ export function coefficientSource(draft: CalibrationDraft, key: CoefficientKey):
 }
 export type CalibrationPayload = { profile: CalibrationProfile; coefficients: CalibrationCoefficients | null; expected_revision: string; ac_voltage_nominal_v?: CalibrationVoltage };
 export function calibrationPayload(draft: CalibrationDraft, supportsV2: boolean): { payload: CalibrationPayload | null; error: string | null; field?: CoefficientKey | 'voltage' } {
-  if (draft.profile !== 'custom') return { payload: { profile: draft.profile, coefficients: null, expected_revision: draft.revision }, error: null };
+  if (!draft.revision) return { payload: null, error: '配置版本标识缺失，请重新载入后再保存。' };
+  if (draft.profile === 'none' || draft.profile === 'local-19v-v1') return { payload: { profile: draft.profile, coefficients: null, expected_revision: draft.revision }, error: null };
+  if (draft.profile !== 'custom') return { payload: null, error: '请先选择支持的校准方式；12 V 适配器使用自定义系数并选择 12 V。' };
   if (draft.schema === 2 && !supportsV2) return { payload: null, error: '当前采集器不支持电压档位配置，请先更新宿主机采集器。' };
   if (supportsV2 && (!draft.voltageConfirmed || draft.voltage === null)) return { payload: null, error: '请先确认适配器电压档位，再填写或采集交流系数。', field: 'voltage' };
   const coefficients: CalibrationCoefficients = { base_gain: 0, charge_gain: null, battery_gain: null };

@@ -85,7 +85,8 @@ def updater(tmp_path, monkeypatch):
     source = tmp_path / 'source'
     for directory in ('ups_panel', 'scripts', 'deploy'):
         (source / directory).mkdir(parents=True)
-    for filename in ('__init__.py', 'updater.py', 'build_info.py'):
+    for filename in ('__init__.py', 'updater.py', 'build_info.py', 'update_client.py',
+                     'update_release.py', 'calibration.py', 'config_target.py', 'collector_health.py'):
         (source / 'ups_panel' / filename).write_text("VERSION = 'test'\n")
     (source / 'scripts/collector-admin.py').write_text("raise RuntimeError('Do not execute downloaded scripts')\n")
     shutil.copyfile(ROOT / 'deploy/ugreen-ups-updater.service', source / 'deploy/ugreen-ups-updater.service')
@@ -520,23 +521,25 @@ def collector(tmp_path, monkeypatch):
     (old / 'ups_panel').mkdir(parents=True)
     (old / 'ups_panel/__init__.py').write_text("VERSION = 'old'\n")
     (old / 'ups_panel/collector.py').write_text("CODE = 'old'\n")
+    (old / 'ups_panel/build_info.py').write_text("VERSION = '0.8.0'\n")
     (base / 'current').symlink_to(old)
     configs = {name: tmp_path / name for name in ('service', 'tmpfiles', 'env')}
     for name, path in configs.items():
         path.write_text('preserve ' + name)
         path.chmod(0o640)
+    configs['env'].write_text(f'UPS_CALIBRATION_CONFIG="{tmp_path}/calibration.json"\n')
     monkeypatch.setattr(module, 'BASE', base)
     monkeypatch.setattr(module, 'CONFIGS', configs)
     monkeypatch.setattr(module, 'LOCK', tmp_path / 'collector.lock')
     fake_systemd(module, monkeypatch, active=True, enabled=False)
     validations = []
-    monkeypatch.setattr(module, 'validate_fresh', lambda started, timeout=20: validations.append((started, timeout)))
+    monkeypatch.setattr(module, 'validate_fresh', lambda started, timeout=20, **kwargs: validations.append((started, timeout)))
     source = tmp_path / 'stage'
     (source / 'ups_panel').mkdir(parents=True)
     for name in ('__init__.py', 'collector.py', 'protocol.py', 'power.py', 'calibration.py', 'usbmon.py', 'build_info.py', 'doctor.py'):
-        (source / 'ups_panel' / name).write_text("VERSION = 'new'\n")
+        (source / 'ups_panel' / name).write_text("VERSION = '0.9.0'\n")
     metadata = {'schema': 1, 'version': '0.9.0', 'revision': 'a' * 40,
-                'source_sha256': 'b' * 64, 'minimum_updater_schema': 1, 'calibration_schemas': [1, 2]}
+                'source_sha256': module.source_build(source)['source_sha256'], 'minimum_updater_schema': 1, 'calibration_schemas': [1, 2]}
     (source / 'collector-release.json').write_text(json.dumps(metadata))
     shutil.copyfile(ROOT / 'LICENSE', source / 'LICENSE')
     module.test_source = source
@@ -623,7 +626,7 @@ def test_preserve_rollback_does_not_restore_or_rewrite_host_configuration(collec
 def test_preserve_update_recovers_original_release_on_failure_or_interruption(collector, monkeypatch, capsys, error):
     before = collector_configuration(collector)
     calls = []
-    def validation(started, timeout=20):
+    def validation(started, timeout=20, **kwargs):
         calls.append(started)
         if len(calls) == 2:
             raise error
@@ -657,7 +660,7 @@ def test_preserve_recovery_reports_failure_when_process_stop_cannot_be_confirmed
         return original(*args, check=check)
     monkeypatch.setattr(collector, 'command', command)
     calls = []
-    def validation(started, timeout=20):
+    def validation(started, timeout=20, **kwargs):
         calls.append(started)
         if len(calls) == 2:
             raise RuntimeError('new version failed')
@@ -685,6 +688,23 @@ def test_metadata_symlink_is_rejected(collector):
     with pytest.raises(ValueError, match='regular file'):
         collector.install(collector.test_source, preserve_host_config=True)
     assert not collector.test_calls
+
+
+def test_release_metadata_fingerprint_must_match_source_before_any_host_changes(collector):
+    (collector.test_source / 'ups_panel/collector.py').write_text('# changed after packaging\n')
+    with pytest.raises(ValueError, match='source identity'):
+        collector.install(collector.test_source, preserve_host_config=True)
+    assert not collector.test_calls
+
+
+def test_preserve_update_rejects_missing_calibration_path_without_modifying_host(collector):
+    collector.CONFIGS['env'].write_text('UPS_CALIBRATION_PROFILE=none\n')
+    before = collector_configuration(collector)
+    with pytest.raises(ValueError, match='calibration_unconfigured'):
+        collector.install(collector.test_source, preserve_host_config=True)
+    assert collector_configuration(collector) == before
+    assert (collector.BASE / 'current').resolve() == collector.test_old
+    assert not any(call[:2] == ('systemctl', 'restart') for call in collector.test_calls)
 
 
 @pytest.mark.parametrize('invalid', ['missing', 'symlink', 'too_large', 'invalid_utf8'])

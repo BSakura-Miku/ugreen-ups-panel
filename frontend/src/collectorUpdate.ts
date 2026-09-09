@@ -1,4 +1,4 @@
-import type { CollectorUpdateStage, CollectorUpdateStatus } from './types';
+import type { CollectorUpdateStage, CollectorUpdateStatus, DiagnosticCheck } from './types';
 
 export type CollectorUpdateAction = 'check' | 'install' | 'rollback';
 export type CollectorReleaseTarget = { version: string; release_id: number; sha256: string };
@@ -94,8 +94,37 @@ export function collectorUpdateError(code: unknown, status = 0): string {
     checksum_mismatch: '安装包校验值不符，已停止安装。', release_changed: '发行附件已改变，请重新检查并确认目标版本。',
     unsafe_destination: '更新暂存目录不符合要求，请检查 NAS 上的更新服务。',
     package_write_failed: '无法写入更新暂存目录，请检查 NAS 磁盘空间。',
+    source_modified: '已安装源码与发行指纹不一致。请先核对并保留本地修改，再通过命令行更新。',
+    runtime_mismatch: '实际运行的采集器版本或源码指纹与已安装源码不一致，请检查服务使用的源码目录、旧进程或重复采集器。',
+    source_unreadable: '无法读取已安装采集器的源码，请检查 NAS 上的安装目录与权限。',
+    calibration_unconfigured: '采集器未接入校准文件路径，请重新运行安装器并指向现有数据目录。',
+    calibration_unreadable: '采集器无法读取校准配置，请核对配置路径、目录权限和文件内容。',
+    calibration_incompatible: '当前校准配置不受正式采集器支持。12 V 适配器请使用自定义系数并选择 12 V。',
+    calibration_mismatch: '采集器报告与校准文件不一致，请先核对路径并等待配置生效。',
+    calibration_target_unverified: '尚未确认采集器使用了同一份校准文件，请按安装说明核对并接通配置路径。',
+    calibration_target_mismatch: '面板与采集器指向不同的校准文件，请先修复数据目录挂载和配置路径，再更新采集器。',
+    configuration_changed: '校准配置在本次操作期间发生变化，请重新检查后再更新。',
   };
   return typeof code === 'string' && Object.hasOwn(messages, code) ? messages[code] : collectorUpdateHttpError(status);
+}
+
+export function collectorPreflightIssue(status: CollectorUpdateStatus | null): string | null {
+  if (status?.source_status === 'modified') return collectorUpdateError('source_modified');
+  if (status?.source_status === 'unreadable') return collectorUpdateError('source_unreadable');
+  return status?.preflight?.ready === false && status.preflight.code ? collectorUpdateError(status.preflight.code) : null;
+}
+
+export function collectorHealthChecks(checks: DiagnosticCheck[] | undefined, fresh: boolean, captureFresh: boolean): DiagnosticCheck[] {
+  const waiting = (id: string, label: string): DiagnosticCheck => ({ id, label, status: 'unknown', detail: '等待当前诊断结果。' });
+  const selected = (id: string, label: string) => {
+    if (!fresh) return waiting(id, label);
+    const check = checks?.find(item => item?.id === id);
+    return check && ['ok', 'waiting', 'warning', 'unknown', 'error'].includes(check.status) && typeof check.detail === 'string'
+      ? { ...check, label } : { ...waiting(id, label), detail: '当前诊断接口尚未提供此项检查，请查看对应设置。' };
+  };
+  return [fresh ? { id: 'capture', label: '实时采集', status: captureFresh ? 'ok' as const : 'waiting' as const,
+    detail: captureFresh ? '正在接收新鲜的 UPS 读数。' : '尚未确认新鲜的 UPS 读数，请检查连接状态。' } : waiting('capture', '实时采集'),
+    selected('calibration', '校准配置'), selected('storage', '历史写入')];
 }
 
 export function collectorOperationResult(operation: CollectorUpdateStatus['operation']): string {
@@ -149,10 +178,30 @@ export function parseCollectorUpdateStatus(value: unknown): CollectorUpdateStatu
       outcome: item.outcome as NonNullable<CollectorUpdateStatus['operation']>['outcome'],
       error: isObject(item.error) && typeof item.error.code === 'string' ? { code: item.error.code.slice(0, 80), message: '' } : null };
   }
+  const extended: Partial<CollectorUpdateStatus> = {};
+  if (value.source_status !== undefined) {
+    if (!['verified', 'unverified', 'modified', 'unreadable', 'unknown'].includes(String(value.source_status))) return null;
+    extended.source_status = value.source_status as CollectorUpdateStatus['source_status'];
+  }
+  if (value.source_error !== undefined) {
+    extended.source_error = isObject(value.source_error) && typeof value.source_error.code === 'string'
+      ? { code: value.source_error.code.slice(0, 80), message: '' } : null;
+  }
+  if (value.runtime !== undefined) {
+    if (value.runtime !== null && (!isObject(value.runtime) || !collectorVersion(value.runtime.version))) return null;
+    extended.runtime = isObject(value.runtime) ? { version: collectorVersion(value.runtime.version),
+      revision: typeof value.runtime.revision === 'string' && /^[a-f0-9]{7,40}$/.test(value.runtime.revision) ? value.runtime.revision : null,
+      source_sha256: typeof value.runtime.source_sha256 === 'string' && /^[a-f0-9]{64}$/.test(value.runtime.source_sha256) ? value.runtime.source_sha256 : null } : null;
+  }
+  if (value.preflight !== undefined) {
+    if (!isObject(value.preflight) || typeof value.preflight.ready !== 'boolean' || typeof value.preflight.target_verified !== 'boolean'
+      || !(value.preflight.code === null || typeof value.preflight.code === 'string')) return null;
+    extended.preflight = { ready: value.preflight.ready, code: typeof value.preflight.code === 'string' ? value.preflight.code.slice(0, 80) : null, target_verified: value.preflight.target_verified };
+  }
   return { schema: 1, installed: value.installed, availability: value.availability as CollectorUpdateStatus['availability'],
     updater_version: collectorVersion(value.updater_version), updater_schema: 1, current, latest,
     checked_at: value.checked_at as number | null, update_available: value.update_available, auth_required: true,
-    rollback: { available: rollback.available, version: collectorVersion(rollback.version), reason: rollback.reason as CollectorUpdateStatus['rollback']['reason'] }, operation };
+    rollback: { available: rollback.available, version: collectorVersion(rollback.version), reason: rollback.reason as CollectorUpdateStatus['rollback']['reason'] }, operation, ...extended };
 }
 
 export function collectorUpdateHttpError(status: number): string {

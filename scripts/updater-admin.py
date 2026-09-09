@@ -352,7 +352,8 @@ def source_files(source):
     if package.is_symlink() or not package.is_dir():
         raise ValueError('Updater source package must be a regular directory.')
     paths = sorted(package.glob('*.py'))
-    required = {'__init__.py', 'updater.py', 'build_info.py'}
+    required = {'__init__.py', 'updater.py', 'build_info.py', 'update_client.py',
+                'update_release.py', 'calibration.py', 'config_target.py', 'collector_health.py'}
     if not required <= {path.name for path in paths}:
         raise ValueError('Updater source is incomplete.')
     helper = source / 'scripts' / 'collector-admin.py'

@@ -16,7 +16,8 @@ import time
 
 from .build_info import get_build_info
 from .protocol import parse_frame
-from .calibration import CalibrationError, SUPPORTED_CONFIG_SCHEMAS, default_config, load_config
+from .calibration import CalibrationError, PROFILES, SUPPORTED_CONFIG_SCHEMAS, default_config, load_config
+from .config_target import config_file_state, target_identity
 from .power import CALIBRATION_PROFILES, PowerEstimator
 from .usbmon import Reader, classify_event, decode_event, discover
 
@@ -250,6 +251,7 @@ class CalibrationState:
         self.fallback = default_config(profile)
         self.config = self.fallback
         self.error = None
+        self.file_state = config_file_state(self.path)
         self.changed_at = None
         self.reset_estimator()
 
@@ -257,9 +259,11 @@ class CalibrationState:
         self.estimator = PowerEstimator(config=self.config)
 
     def refresh(self, now=None):
+        self.file_state = config_file_state(self.path)
         try:
             config = (load_config(self.path) if self.path else None) or self.fallback
         except CalibrationError as exc:
+            self.file_state = 'unreadable' if exc.code == 'file_unreadable' else 'invalid'
             message = str(exc)
             if message != self.error:
                 LOG.warning('Calibration configuration: %s', message)
@@ -286,6 +290,8 @@ class CalibrationState:
 
     def snapshot(self):
         return {'config': self.config, 'configurable': bool(self.path), 'error': self.error,
+                'config_target': target_identity(self.path), 'file_state': self.file_state,
+                'supported_profiles': list(PROFILES),
                 'supported_config_schemas': list(SUPPORTED_CONFIG_SCHEMAS)}
 
 

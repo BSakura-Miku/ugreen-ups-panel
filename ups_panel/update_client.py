@@ -24,6 +24,16 @@ ERRORS = {
     'stale_release': '发行信息已变化，请重新检查更新。',
     'no_update': '已安装此版本或更高版本。',
     'collector_unavailable': '采集器未正常运行，恢复采集后再更新。',
+    'source_modified': '已安装源码与发行指纹不一致。请先核对并保留本地修改，再通过命令行更新。',
+    'source_unreadable': '无法读取已安装采集器源码，请检查源码完整性和权限。',
+    'runtime_mismatch': '实际运行的采集器与已安装源码版本或指纹不一致，请检查旧进程和重复采集器服务。',
+    'calibration_unconfigured': '采集器未接入校准配置。请用现有数据目录重新运行采集器安装器并指定 --data-dir。',
+    'calibration_unreadable': '校准文件或所在目录无法读取，请检查数据目录挂载与读取权限。',
+    'calibration_incompatible': '当前校准配置不受官方版本支持或内容无效。请先核对自定义配置和系数，再更新采集器。',
+    'calibration_mismatch': '采集器当前配置与宿主配置文件不一致，请检查配置路径、systemd 覆盖项和采集器生效状态。',
+    'calibration_target_unverified': '无法确认采集器实际读取的校准目标，请更新宿主安装器并检查配置路径。',
+    'calibration_target_mismatch': '面板与采集器指向不同的校准文件，请先修复数据目录挂载和配置路径，再更新采集器。',
+    'configuration_changed': '校准配置在更新期间发生变化，请确认配置已生效后重试。',
     'rollback_unavailable': '没有可通过面板回退的兼容版本。',
     'stale_current': '采集器版本已变化，请刷新后重试。',
     'network_error': '无法连接发行服务器，请检查 NAS 网络后重试。',
@@ -85,6 +95,8 @@ def build_value(value):
 def unavailable(availability='not_installed'):
     return {'schema': SCHEMA, 'installed': False, 'availability': availability,
             'updater_version': None, 'updater_schema': SCHEMA, 'current': None,
+            'source_status': 'unknown', 'source_error': None, 'runtime': None,
+            'preflight': {'ready': False, 'code': None, 'target_verified': False},
             'latest': None, 'checked_at': None, 'update_available': False, 'auth_required': True,
             'rollback': {'available': False, 'version': None, 'reason': 'unknown'}, 'operation': None}
 
@@ -98,6 +110,18 @@ def public_status(value):
     result = unavailable('ready')
     result.update(installed=True, updater_version=value['updater_version'],
                   current=build_value(value.get('current')), checked_at=timestamp(value.get('checked_at')))
+    result['runtime'] = build_value(value.get('runtime'))
+    source_status = value.get('source_status')
+    result['source_status'] = source_status if source_status in ('verified', 'unverified', 'modified', 'unreadable') else 'unknown'
+    source_error = value.get('source_error')
+    if isinstance(source_error, dict) and source_error.get('code') in ('source_modified', 'source_unreadable'):
+        result['source_error'] = UpdateError(source_error['code']).public()
+    preflight = value.get('preflight')
+    if isinstance(preflight, dict):
+        code = preflight.get('code')
+        result['preflight'] = {'ready': preflight.get('ready') is True and code is None,
+                               'code': code if isinstance(code, str) and code in ERRORS else None,
+                               'target_verified': preflight.get('target_verified') is True}
     latest = value.get('latest')
     if latest is not None:
         if (not isinstance(latest, dict) or not version(latest.get('version'))

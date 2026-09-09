@@ -3,7 +3,7 @@ import json
 from uuid import uuid4
 
 from .power import finite_number
-from .battery_energy import BatteryEnergy, context_changed, evidence, render as render_energy
+from .battery_energy import BatteryEnergy, calibration_rejected, context_changed, evidence, render as render_energy
 
 MAX_GAP_SEC = 10
 STATE_KEY = 'battery_sessions_state'
@@ -58,6 +58,10 @@ class BatterySessions:
         if not view.get('fresh') or not isinstance(view.get('sample'), dict):
             self.interrupt('offline')
             return
+        # Re-reading a timestamp after calibration was rejected must revoke its
+        # integration anchor, even though raw session samples remain deduped.
+        if calibration_rejected(view):
+            self.energy.break_anchor('invalid_basis')
         sample = view['sample']
         ts = sample.get('timestamp')
         if not finite_number(ts) or ts < 0:

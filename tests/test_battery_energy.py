@@ -56,6 +56,33 @@ def energy(sessions, db, now=120):
     return records(sessions, db, now)[0]['energy']
 
 
+@pytest.mark.parametrize('duplicate', [False, True])
+@pytest.mark.parametrize('restart', [False, True])
+def test_explicit_calibration_rejection_breaks_energy_anchor_even_on_duplicate(db, duplicate, restart):
+    sessions = BatterySessions(db)
+    sessions.ingest(view(100))
+    sessions.ingest(view(102))
+    rejected = view(102 if duplicate else 103, power=999)
+    # Residual coefficients are self-consistent: explicit ingestion rejection
+    # must still win, and must not turn the raw battery session into an outage.
+    rejected['calibration_validation'] = {'valid': False, 'reason': 'config_mismatch'}
+    sessions.ingest(rejected)
+    assert sessions.active is not None and sessions.energy.active['anchor'] is None
+    assert energy(sessions, db)['covered_duration_sec'] == 2
+    if restart:
+        commit(sessions, db)
+        sessions = BatterySessions(db)
+        assert sessions.energy.active['anchor'] is None
+    sessions.ingest(view(104))
+    sessions.ingest(view(106))
+    result = energy(sessions, db)
+    assert len(records(sessions, db)) == 1
+    assert result['estimate_wh'] == pytest.approx(80 / 3600)
+    assert result['covered_duration_sec'] == 4 and result['observed_duration_sec'] == 6
+    assert result['interval_count'] == 2 and result['status'] == 'partial'
+    assert 'invalid_basis' in result['reasons']
+
+
 def test_trapezoids_use_unsmoothed_power_and_actual_irregular_sample_times(db):
     sessions = BatterySessions(db)
     for item in (view(98, mode='online'), view(100, 10, soc=90), view(102, 20, soc=89),

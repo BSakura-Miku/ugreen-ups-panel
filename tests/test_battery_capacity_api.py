@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from ups_panel.calibration import normalize_config
 from ups_panel.collector import atomic_json
+from ups_panel.power import PowerEstimator
 from ups_panel.protocol import parse_frame
 from ups_panel.storage import Store
 
@@ -23,11 +24,10 @@ FRAME = bytes.fromhex((Path(__file__).parents[1] / 'fixtures/online.hex').read_t
 def view(ts, *, mode='online', soc=95):
     config = normalize_config({'schema': 1, 'profile': 'local-19v-v1'})
     sample = parse_frame(FRAME, ts)
-    sample.update(mode=mode, soc=soc, battery_discharge_power_candidate_w=40,
-                  calibration_profile=config['profile'], calibration_revision=config['revision'],
-                  calibration_coefficients=config['coefficients'],
-                  battery_estimate_basis='nominal_43_2wh_soc_v1')
+    sample.update(mode=mode, soc=soc, battery_discharge_power_candidate_w=40)
+    sample = PowerEstimator(config=config).update(sample)
     return {'schema': 1, 'source': 'usbmon', 'device': {'serial': 'SYNTHETIC-CAPACITY-API'},
+            'calibration': {'config': config, 'configurable': True, 'error': None},
             'heartbeat': ts, 'server_time': ts, 'fresh': True, 'sample': sample, 'nut': {}}
 
 

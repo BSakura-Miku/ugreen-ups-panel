@@ -11,7 +11,7 @@ import statistics
 import time
 from uuid import uuid4
 
-from .battery_energy import evidence
+from .battery_energy import calibration_rejected, evidence
 from .power import finite_number
 
 
@@ -193,6 +193,10 @@ class BatteryCapacity:
         if not isinstance(view, dict) or not view.get('fresh') or not isinstance(view.get('sample'), dict):
             self._break('stale')
             return
+        if calibration_rejected(view):
+            # An invalid duplicate still ends this observation window. A later
+            # valid report cannot stitch the interrupted SOC interval together.
+            self._break('invalid_basis')
         sample = view['sample']
         ts = _number(sample.get('timestamp'))
         if ts is None:

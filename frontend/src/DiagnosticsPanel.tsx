@@ -155,12 +155,12 @@ function DiagnosticsContent() {
           <div><dt>解码版本</dt><dd>{diagnosticCount(versions?.decoder_version)}</dd></div>
         </dl>
         <p className="diag-note">USB 描述符版本与 UPS 固件版本是不同字段；例如 1.00 不能据此解释成固件 V3.3。旧采集器未提供的信息显示为未知。</p>
-      </article><CollectorUpdatePanel fallbackCurrent={versions?.collector}/></div>
+      </article><CollectorUpdatePanel fallbackCurrent={versions?.collector} diagnosticsFresh={responseFresh} captureFresh={data?.capture_fresh === true && sampleAge <= 10} checks={connection?.checks}/></div>
       <article className="panel diag-card" aria-labelledby="diag-connection-heading">
         <h3 id="diag-connection-heading"><Cable size={18}/>连接检查</h3>
         <p className="diag-note">逐项显示已观测到的连接条件；检查通过不代表电池或设备健康。</p>
         {connection?.checks.length ? <ul className="diag-checks">{connection.checks.map((check, index) => {
-          const status = responseFresh && check.status in checkLabels ? check.status : 'unknown';
+          const status = responseFresh && Object.hasOwn(checkLabels, check.status) ? check.status : 'unknown';
           return <li key={`${check.id}-${index}`}><details className="diag-check-detail"><summary><strong>{check.label}</strong><span className={`diag-status diag-status-${status}`}>{checkLabels[status]}</span></summary><p>{responseFresh ? check.detail : '等待更新诊断结果。'}</p></details>{(status === 'warning' || status === 'error') && <p className="diag-check-warning">{check.detail}</p>}</li>;
         })}</ul> : <p className="diag-empty">等待采集器连接信息。</p>}
         <dl className="diag-values diag-connection-meta">

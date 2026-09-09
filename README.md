@@ -80,7 +80,7 @@ cd /volume1/docker/ugreen-ups-panel &&
 sudo sh scripts/install-collector.sh
 ```
 
-出现 `Fresh UPS telemetry verified.` 表示安装成功。脚本会自动安装并启用采集器、准备 `data` 目录；原有 UPS 服务保持运行。
+安装器会核对新鲜遥测、实际运行的源码身份，以及采集器是否接通指定校准文件；成功输出包含 `fresh UPS telemetry verified` 和配置检查结果。新版采集器同时确认配置目标身份，旧版只能核对内容并提示路径身份尚未确认。脚本会自动安装并启用采集器、准备 `data` 目录；原有 UPS 服务保持运行。
 
 ### 3. 创建 Docker 项目
 
@@ -117,9 +117,15 @@ services:
 
 ## 更新
 
+**v0.12.1 加强校准、安装与升级可靠性。** 更新面板和采集器可获得校准异常隔离、明确的保存原因和配置目标核对；新的宿主升级预检还需更新宿主更新服务自身，步骤见下文。
+
 **v0.12.0 的用电统计只需更新面板镜像；已有 v0.9.1 采集器和更新服务继续兼容。**
 
 **v0.9.1 可选启用[网页采集器更新](docs/collector-update.md)。** 首次安装宿主更新服务并添加通信目录挂载后，可在「诊断与说明」检查新版、更新和回退；需要管理密钥。已有 v0.8.0 采集器可直接作为起点。面板镜像仍通过 Docker 更新。
+
+已启用网页更新时，直接按[日常操作与升级后核对](docs/collector-update.md#日常操作)执行，无需重复首次安装。「检查更新」只查询发行版，点击「查看并更新」和「确认安装此版本」才开始升级。
+
+网页升级只替换采集器。要启用新的源码修改检查、运行版本核对和校准配置预检，需按[更新宿主更新服务](docs/collector-update.md#更新宿主更新服务)在命令行更新服务自身；旧服务仍兼容，但页面会提示尚未提供完整预检。升级后分别核对已安装源码、实际运行版本、校准配置和历史写入。
 
 以下为不启用网页更新时的命令行流程。完整诊断需 v0.8.0 或更新的宿主采集器。 先按[备份说明](docs/architecture.md#备份与维护)保存数据库和校准配置。以下路径改成实际部署路径；所有 Compose 命令沿用原项目名，曾自定义项目名时统一加 `-p 原项目名`。源码下载到临时目录，安装后清理，原 `data` 与 `docker-compose.yaml` 保留。旧采集器仍可提供已有遥测，新增环境、版本及部分系统信息会显示未知。
 
@@ -128,7 +134,7 @@ services:
   set -eu
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT
-  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.12.0 -o "$tmp_dir/source.tar.gz"
+  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.12.1 -o "$tmp_dir/source.tar.gz"
   tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir"
   sudo sh "$tmp_dir/scripts/install-collector.sh" --data-dir /volume1/docker/ugreen-ups-panel/data
   sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml pull
@@ -149,6 +155,8 @@ services:
 每个采样窗口至少需要 12 个去重读数；数据缺失、模式变化或相关读数波动超过 10% 时重采。填写结果后点击保存，等待采集器确认生效。助手使用手工输入的交流读数，不自动连接 HA、切换插座或安排断电。
 
 默认仍为 `none`，也可选择 `local-19v-v1` 或 `custom`；样机预设仅适用于原 19 V 配置，不能用于 12 V。自定义交流估算按所选电压 ±1 V 匹配，使用 8 秒平滑，始终标为未独立验证。系数范围、部分配置与模型证据见[功率校准说明](docs/calibration.md)。
+
+12 V 适配器使用 `custom` 并确认 `12 V`，无需新增配置名。保存不可用时，页面会说明校准路径、文件读取、配置兼容或采样过期等原因。未知配置不会沿用系数或自动套用 19 V；校准信息无效时暂停相关功率估算与能量累计，有效电量、电压等原始遥测继续显示和记录。
 
 ## 配置与数据
 

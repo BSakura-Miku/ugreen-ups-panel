@@ -16,82 +16,16 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .storage import CONTEXT_FIELDS, Store, METRICS
-from .power import finite_number
+from .telemetry import load_snapshot
 from .cell_balance import CellBalanceMonitor
 from .raw_observation import RawObservationMonitor
 from .diagnostics import diagnostic_view, diagnostic_export, observation_csv
 from .update_api import install_update_routes
-from .calibration import (CalibrationError, DEFAULT_COEFFICIENTS, default_config,
-                          load_config, normalize_config, save_config)
+from .calibration import CalibrationError, normalize_config, save_config
+from .calibration_status import calibration_status as assess_calibration
+from .storage_health import storage_error_code, storage_message, storage_status
 
 LOG = logging.getLogger('panel')
-
-
-def load_snapshot(path, now=None):
-    now = time.time() if now is None else now
-    try:
-        with Path(path).open('rb') as source:
-            encoded = source.read(65537)
-        if len(encoded) > 65536:
-            raise ValueError('Snapshot too large')
-        def reject_constant(value):
-            raise ValueError(f'Invalid JSON number: {value}')
-        def parse_number(value):
-            number = float(value)
-            if not finite_number(number):
-                raise ValueError('Non-finite JSON number')
-            return number
-        value = json.loads(encoded, parse_constant=reject_constant, parse_float=parse_number)
-        if not isinstance(value, dict) or type(value.get('schema')) is not int or value['schema'] != 1:
-            raise ValueError('Unknown snapshot schema')
-        if not finite_number(value.get('heartbeat')):
-            raise ValueError('Invalid heartbeat')
-        sample = value.get('sample')
-        if sample is not None:
-            if (not isinstance(sample, dict) or sample.get('mode') not in ('online', 'charging', 'battery', 'unknown')
-                    or not finite_number(sample.get('timestamp')) or sample['timestamp'] < 0
-                    or not isinstance(sample.get('cells'), list) or len(sample['cells']) != 4):
-                raise ValueError('Invalid sample')
-            if (not finite_number(sample.get('soc')) or not 0 <= sample['soc'] <= 100
-                    or any(not finite_number(v) or not 1 <= v <= 5 for v in sample['cells'])):
-                raise ValueError('Invalid battery field')
-            for key in METRICS:
-                if sample.get(key) is not None and not finite_number(sample[key]):
-                    raise ValueError('Invalid numeric field')
-            for key in ('formula_version', 'decoder_version'):
-                if key in sample and (type(sample[key]) is not int or sample[key] < 1):
-                    raise ValueError('Invalid sample version')
-            for key in set(CONTEXT_FIELDS) - {'formula_version', 'decoder_version', 'calibration_coefficients',
-                                            'calibration_schema', 'ac_voltage_nominal_v'}:
-                if sample.get(key) is not None and (not isinstance(sample[key], str) or len(sample[key]) > 128):
-                    raise ValueError('Invalid calibration metadata')
-            if 'calibration_coefficients' in sample:
-                config_data = {'schema': sample.get('calibration_schema', 1), 'profile': sample.get('calibration_profile'),
-                               'coefficients': sample['calibration_coefficients']}
-                if 'ac_voltage_nominal_v' in sample:
-                    config_data['ac_voltage_nominal_v'] = sample['ac_voltage_nominal_v']
-                config = normalize_config(config_data)
-                if sample.get('calibration_revision') != config['revision']:
-                    raise ValueError('Calibration revision does not match coefficients')
-            elif 'calibration_schema' in sample or 'ac_voltage_nominal_v' in sample:
-                raise ValueError('Versioned calibration metadata requires its coefficients')
-            if (not isinstance(sample.get('warnings', []), list)
-                    or any(not isinstance(warning, str) for warning in sample.get('warnings', []))):
-                raise ValueError('Invalid warnings')
-        age = now - sample['timestamp'] if sample else None
-        heartbeat_age = now - value['heartbeat']
-        value.update(fresh=sample is not None and 0 <= age <= 10 and 0 <= heartbeat_age <= 10,
-                     age_sec=round(max(0, age), 1) if age is not None else None,
-                     server_time=now)
-        nut = value.get('nut')
-        if (not isinstance(nut, dict) or not isinstance(nut.get('available', False), bool)
-                or not finite_number(nut.get('timestamp', 0))):
-            value['nut'] = {'available': False}
-        return value
-    except (OSError, ValueError, TypeError, KeyError, RecursionError) as exc:
-        return {'fresh': False, 'sample': None, 'age_sec': None, 'server_time': now,
-                'source': 'unavailable', 'nut': {'available': False},
-                'diagnostics': {'error': '尚未收到有效采集数据'}, 'read_error': type(exc).__name__}
 
 
 def create_app(snapshot=None, database=None, static=None, calibration=None):
@@ -100,7 +34,7 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
     static = Path(static or os.getenv('UPS_STATIC', 'frontend/dist'))
     calibration = Path(calibration or os.getenv('UPS_CALIBRATION_CONFIG') or Path(database).with_name('calibration.json'))
     calibration_lock = asyncio.Lock()
-    state = {'store': None, 'storage_error': None, 'last_success': 0,
+    state = {'store': None, 'storage_error': None, 'storage_error_code': None, 'last_success': 0,
              'observation_ready': asyncio.Event()}
     cell_balance = CellBalanceMonitor()
     raw_observation = RawObservationMonitor()
@@ -125,9 +59,11 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
                     state['store'] = await asyncio.to_thread(Store, database)
                 await asyncio.to_thread(state['store'].ingest, view)
                 state['storage_error'] = None
+                state['storage_error_code'] = None
                 state['last_success'] = time.time()
             except (OSError, sqlite3.Error, ValueError, TypeError, KeyError) as exc:
-                state['storage_error'] = '历史记录暂不可用'
+                state['storage_error_code'] = storage_error_code(exc)
+                state['storage_error'] = storage_message(state['storage_error_code'])
                 LOG.warning('History writer: %s', exc)
             await asyncio.sleep(2)
 
@@ -147,7 +83,8 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
                     LOG.exception('History flush failed')
 
     app = FastAPI(title='US3000 监控面板', lifespan=lifespan, docs_url=None, redoc_url=None)
-    install_update_routes(app, lambda: load_snapshot(snapshot))
+    install_update_routes(app, lambda: load_snapshot(snapshot),
+                          calibration_status=lambda: assess_calibration(load_snapshot(snapshot), calibration))
 
     @app.middleware('http')
     async def headers(request, call_next):
@@ -174,6 +111,8 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
             view = load_snapshot(snapshot)
             view['cell_balance'] = cell_balance.snapshot(view)
         view['storage_error'] = state['storage_error']
+        view['storage_error_code'] = state['storage_error_code']
+        view['storage'] = storage_status(state)
         view['storage_dropped_buckets'] = state['store'].dropped_buckets if state['store'] else 0
         nut = view.setdefault('nut', {})
         nut['fresh'] = bool(nut.get('available') and 0 <= time.time() - nut.get('timestamp', 0) <= 45)
@@ -183,6 +122,7 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
     def health():
         return {'service': 'ok', 'capture_fresh': load_snapshot(snapshot)['fresh'],
                 'storage_error': state['storage_error'],
+                'storage_error_code': state['storage_error_code'], 'storage': storage_status(state),
                 'storage_dropped_buckets': state['store'].dropped_buckets if state['store'] else 0}
 
     def diagnostics_data(minutes):
@@ -191,7 +131,8 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
         observation = raw_observation.snapshot(view, now=now, minutes=minutes)
         return diagnostic_view(view, observation, now=now,
                                storage_ready=bool(state['last_success']),
-                               storage_error=state['storage_error'])
+                               storage_error=state['storage_error'], storage_error_code=state['storage_error_code'],
+                               calibration_readiness=assess_calibration(view, calibration)['readiness'])
 
     @app.get('/api/diagnostics')
     def diagnostics(minutes: int = Query(60, ge=1, le=60)):
@@ -211,38 +152,7 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
                         headers={'Content-Disposition': 'attachment; filename="us3000-observation.csv"'})
 
     def calibration_status():
-        view = load_snapshot(snapshot)
-        metadata = view.get('calibration')
-        metadata = metadata if isinstance(metadata, dict) else {}
-        active = None
-        error = None
-        try:
-            if metadata.get('config') is not None:
-                active = normalize_config(metadata['config'])
-            else:
-                profile = (view.get('sample') or {}).get('calibration_profile')
-                if profile in ('none', 'local-19v-v1'):
-                    active = default_config(profile)
-        except CalibrationError:
-            error = '采集器的校准配置无效，请检查采集器。'
-        try:
-            desired = load_config(calibration) or active or default_config()
-        except CalibrationError:
-            desired = active or default_config()
-            error = '校准配置文件无法读取，可重新保存有效配置。'
-        if metadata.get('error'):
-            error = '采集器未能读取新配置，仍保留上一次有效配置。'
-        ready = bool(view['fresh'] and metadata.get('configurable') is True and active
-                     and (view.get('sample') or {}).get('calibration_revision') == active['revision'])
-        supported = metadata.get('supported_config_schemas', [1])
-        if (not isinstance(supported, list) or not supported
-                or any(type(version) is not int or version not in (1, 2) for version in supported)):
-            supported = [1]
-        return {'schema': 1, 'defaults': DEFAULT_COEFFICIENTS, 'desired': desired,
-                'active': active, 'collector_ready': ready,
-                'supported_config_schemas': sorted(set(supported)),
-                'pending': active is None or desired['revision'] != active['revision'],
-                'error': error}
+        return assess_calibration(load_snapshot(snapshot), calibration)
 
     def client_config_version(request):
         version = request.headers.get('x-ups-calibration-version', '1')
@@ -309,13 +219,13 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
         async with calibration_lock:
             current = calibration_status()
             require_compatible_client(current, client_version)
-            if not current['collector_ready']:
-                raise HTTPException(503, '需要已更新并正常采集的宿主机采集器，请等待连接或更新采集器。')
+            if not current['readiness']['can_save']:
+                raise HTTPException(503, current['readiness']['message'] or '采集器尚未准备好接收校准配置。')
             if config['schema'] not in current['supported_config_schemas']:
                 raise HTTPException(503, '当前宿主机采集器尚不支持多电压校准，请先更新采集器；原配置未改变。')
             if (current['desired']['schema'] == 2 and config['profile'] == 'custom' and config['schema'] == 1):
                 raise HTTPException(409, '新版自定义配置必须保留适配器电压档位，请刷新页面后再保存。')
-            if payload['expected_revision'] != current['desired']['revision']:
+            if payload['expected_revision'] != current['edit_revision']:
                 raise HTTPException(409, '配置已在其他页面改变，请重新载入后再保存。')
             try:
                 await asyncio.to_thread(save_config, calibration, config)
@@ -324,38 +234,38 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
             return calibration_status()
 
     def store():
-        if state['store'] is None or state['storage_error']:
-            raise HTTPException(503, '历史记录暂不可用')
+        if state['store'] is None:
+            raise HTTPException(503, state['storage_error'] or '历史存储正在初始化，请稍后重试。')
         return state['store']
 
     @app.get('/api/history')
     def history(hours: int = Query(24, ge=1, le=8760)):
         try:
             return store().history(hours)
-        except (sqlite3.Error, ValueError, TypeError, KeyError):
-            raise HTTPException(503, '历史查询失败')
+        except (sqlite3.Error, ValueError, TypeError, KeyError) as exc:
+            raise HTTPException(503, storage_message(storage_error_code(exc)))
 
     @app.get('/api/events')
     def events():
         try:
             return store().events()
-        except (sqlite3.Error, ValueError, TypeError, KeyError):
-            raise HTTPException(503, '事件查询失败')
+        except (sqlite3.Error, ValueError, TypeError, KeyError) as exc:
+            raise HTTPException(503, storage_message(storage_error_code(exc)))
 
     @app.get('/api/battery-sessions')
     def battery_sessions(days: int = Query(90, ge=1, le=365), limit: int = Query(50, ge=1, le=500)):
         try:
             view = load_snapshot(snapshot)
             return store().battery_history(days, limit, now=view['server_time'], capture_fresh=view['fresh'])
-        except (sqlite3.Error, ValueError, TypeError, KeyError):
-            raise HTTPException(503, '电池供电记录查询失败')
+        except (sqlite3.Error, ValueError, TypeError, KeyError) as exc:
+            raise HTTPException(503, storage_message(storage_error_code(exc)))
 
     @app.get('/api/battery-capacity')
     def battery_capacity():
         try:
             return store().capacity_reference(load_snapshot(snapshot))
-        except (sqlite3.Error, ValueError, TypeError, KeyError):
-            raise HTTPException(503, '相对容量参考暂不可用')
+        except (sqlite3.Error, ValueError, TypeError, KeyError) as exc:
+            raise HTTPException(503, storage_message(storage_error_code(exc)))
 
     @app.get('/api/energy-usage')
     def energy_usage(month: str = Query(None, min_length=7, max_length=7,
@@ -370,9 +280,11 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
         try:
             result = store().usage_month(month, lambda: load_snapshot(snapshot))
             result['storage_error'] = state['storage_error']
+            result['storage_error_code'] = state['storage_error_code']
+            result['storage'] = storage_status(state)
             return result
-        except (OSError, sqlite3.Error, ValueError, TypeError, KeyError):
-            raise HTTPException(503, '用电统计暂不可用') from None
+        except (OSError, sqlite3.Error, ValueError, TypeError, KeyError) as exc:
+            raise HTTPException(503, storage_message(storage_error_code(exc))) from None
 
     @app.get('/api/energy-usage/day')
     def energy_usage_day(date: str = Query(..., min_length=10, max_length=10,
@@ -386,9 +298,11 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
         try:
             result = store().usage_day(date, lambda: load_snapshot(snapshot))
             result['storage_error'] = state['storage_error']
+            result['storage_error_code'] = state['storage_error_code']
+            result['storage'] = storage_status(state)
             return result
-        except (OSError, sqlite3.Error, ValueError, TypeError, KeyError):
-            raise HTTPException(503, '当日用电统计暂不可用') from None
+        except (OSError, sqlite3.Error, ValueError, TypeError, KeyError) as exc:
+            raise HTTPException(503, storage_message(storage_error_code(exc))) from None
 
     @app.post('/api/battery-capacity/reset')
     async def reset_battery_capacity(request: Request):
@@ -421,6 +335,8 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
         except (ValueError, TypeError, RecursionError):
             raise HTTPException(400, '参考请求无效，请刷新页面。') from None
         try:
+            if state['storage_error']:
+                raise HTTPException(503, state['storage_error'])
             return await asyncio.to_thread(store().reset_capacity_reference,
                                            lambda: load_snapshot(snapshot), payload['expected_epoch_id'])
         except ValueError as exc:

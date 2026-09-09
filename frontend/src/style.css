@@ -430,6 +430,9 @@ main:focus{outline:none}
 .update-operation-warning strong,.update-operation-warning p{color:#e5c79f}
 .update-operation-warning small{color:#c4ad8a}
 .update-operation .update-link{margin-top:10px}
+.update-health{margin-top:20px;padding-top:18px;border-top:1px solid var(--line)}
+.update-health h4{font-size:13px;font-weight:500;color:#d2dec9;margin:0 0 8px}
+.update-health .diag-checks{margin-top:7px}
 .update-rollback{margin-top:17px;border-top:1px solid var(--line);padding-top:7px}
 .update-rollback summary svg{vertical-align:middle;margin-right:6px}
 .update-rollback .update-button{margin-top:13px}

@@ -7,6 +7,8 @@ import re
 import time
 
 from .build_info import get_build_info
+from .calibration_status import REASONS, readiness_message
+from .storage_health import STORAGE_MESSAGES, storage_message
 
 NUT_FIELDS = frozenset({
     'ups.status', 'ups.alarm', 'battery.charge', 'battery.runtime',
@@ -124,7 +126,8 @@ def build_view(raw):
             'source_sha256': text(raw.get('source_sha256'), 64)}
 
 
-def diagnostic_view(view, observation, *, storage_ready=False, storage_error=None, now=None):
+def diagnostic_view(view, observation, *, storage_ready=False, storage_error=None,
+                    storage_error_code=None, calibration_readiness=None, now=None):
     now = time.time() if now is None else now
     view = mapping(view)
     collector = mapping(view.get('collector'))
@@ -196,7 +199,17 @@ def diagnostic_view(view, observation, *, storage_ready=False, storage_error=Non
     check('association', '两路设备关联', 'ok' if association == 'matched' else 'warning' if association == 'different' else 'unknown',
           '已核对为同一设备' if association == 'matched' else '系统查询目标与采集设备不一致' if association == 'different' else '尚未确认 NUT 查询与私有采集指向同一设备')
     check('storage', '历史写入', 'warning' if storage_error else 'ok' if storage_ready else 'waiting',
-          '历史记录暂不可写，实时观察仍可继续' if storage_error else '最近历史写入成功' if storage_ready else '等待历史存储初始化')
+          storage_message(storage_error_code) if storage_error else '最近历史写入成功' if storage_ready else '等待历史存储初始化')
+    safe_readiness = None
+    if calibration_readiness is not None:
+        raw = mapping(calibration_readiness)
+        code = raw.get('code') if raw.get('code') in REASONS else None
+        safe_readiness = {'ready': raw.get('ready') is True, 'can_save': raw.get('can_save') is True,
+                          'code': code, 'target': raw.get('target') if raw.get('target') in
+                          ('matched', 'mismatched', 'unverified', 'unavailable') else 'unverified'}
+        check('calibration', '校准配置', 'warning' if code else 'ok' if safe_readiness['ready'] else 'waiting',
+              readiness_message(code) if code else '采样与校准配置一致，配置文件路径已核对'
+              if safe_readiness['ready'] else '等待校准配置就绪')
     raw_counters = mapping(capture.get('recent_counters'))
     counters = {key: value for key, value in raw_counters.items()
                 if key in {'target_events', 'not_completion', 'not_interrupt_in', 'invalid_status',
@@ -213,6 +226,10 @@ def diagnostic_view(view, observation, *, storage_ready=False, storage_error=Non
         'connection': {'checks': checks, 'usb_age_sec': usb_age, 'nut_query_age_sec': query_age,
                        'pollonly': pollonly, 'counters': counters, 'association': association},
         'system': system, 'observation': observation,
+        'calibration_readiness': safe_readiness,
+        'storage': {'ready': bool(storage_ready and not storage_error),
+                    'code': storage_error_code if storage_error_code in STORAGE_MESSAGES else
+                    'database_unavailable' if storage_error else None},
     }
 
 
@@ -285,6 +302,8 @@ def diagnostic_export(diagnostic):
         'privacy': {'mode': 'allowlist', 'omitted': ['serial', 'addresses', 'usb_paths', 'nut_target',
                                                     'free_text_alarms', 'full_raw_frames']},
         'versions': safe_versions, 'connection': diagnostic['connection'],
+        'calibration_readiness': diagnostic.get('calibration_readiness'),
+        'storage': diagnostic.get('storage'),
         'system': {'available': system['available'], 'fresh': system['fresh'],
                    'status_tokens': system['status_tokens'], 'values': values,
                    'notices': system['notices'], 'thresholds': system['thresholds'],

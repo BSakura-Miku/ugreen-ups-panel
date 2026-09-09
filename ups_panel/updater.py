@@ -21,6 +21,7 @@ import time
 import uuid
 
 from .build_info import VERSION
+from .collector_health import calibration_readiness, environment_config
 from .update_client import (SCHEMA, SOCKET, MAX_REQUEST, MAX_RESPONSE, KEY_PATTERN, UpdateError,
                             build_value, hex_value, public_status, unavailable, version, version_tuple)
 from .update_release import ReleaseClient, ReleaseError, extract_package
@@ -33,6 +34,7 @@ class UpdaterPaths:
     key: Path = Path('/etc/ugreen-ups-updater/key')
     socket: Path = Path(SOCKET)
     snapshot: Path = Path('/run/ugreen-ups-panel/latest.json')
+    config_env: Path = Path('/etc/ugreen-ups-panel.env')
     helper: Path = Path(__file__).resolve().parents[1] / 'scripts' / 'collector-admin.py'
     trusted_uid: int = 0
     socket_gid: int = 10001
@@ -71,6 +73,12 @@ def release_path(paths, target=None):
     return directory
 
 
+class SourceModified(ValueError):
+    def __init__(self, build):
+        self.build = build
+        super().__init__('Collector identity changed')
+
+
 def read_build(paths, target=None):
     directory = release_path(paths, target)
     digest = hashlib.sha256()
@@ -98,7 +106,7 @@ def read_build(paths, target=None):
     if metadata.exists() or metadata.is_symlink():
         value = read_json(metadata, uid=paths.trusted_uid)
         if value.get('version') != build_version or value.get('source_sha256') != result['source_sha256']:
-            raise ValueError('Collector identity changed')
+            raise SourceModified(result)
         result['revision'] = hex_value(value.get('revision'), 40)
     return result
 
@@ -258,10 +266,33 @@ class UpdateManager:
             Path(temporary).unlink(missing_ok=True)
 
     def _current(self):
+        return self._source_state()[0]
+
+    def _source_state(self):
         try:
-            return read_build(self.paths)
+            build = read_build(self.paths)
+            has_metadata = (release_path(self.paths) / 'collector-release.json').is_file()
+            return build, 'verified' if has_metadata else 'unverified', None
+        except SourceModified as exc:
+            return exc.build, 'modified', 'source_modified'
         except (OSError, ValueError, TypeError, RecursionError, SyntaxError):
-            return None
+            return None, 'unreadable', 'source_unreadable'
+
+    def _preflight(self):
+        current, source_status, code = self._source_state()
+        result = {'ready': False, 'code': code, 'target_verified': False}
+        if code:
+            return result
+        if not fresh_snapshot(self.paths):
+            return dict(result, code='collector_unavailable')
+        if not fresh_snapshot(self.paths, current):
+            return dict(result, code='runtime_mismatch')
+        try:
+            path, profile = environment_config(self.paths.config_env)
+            require_target = (release_path(self.paths) / 'ups_panel' / 'config_target.py').is_file()
+            return calibration_readiness(read_json(self.paths.snapshot, 65536), path, profile, require_target=require_target)
+        except (OSError, ValueError, TypeError, RecursionError):
+            return dict(result, code='calibration_unreadable')
 
     def _wait_recovered(self, expected, after, timeout=20):
         deadline = time.monotonic() + timeout
@@ -276,7 +307,17 @@ class UpdateManager:
     def status(self):
         with self.lock:
             result = unavailable('ready')
-            result.update(installed=True, updater_version=VERSION, current=self._current(),
+            current, source_status, source_code = self._source_state()
+            try:
+                snapshot = read_json(self.paths.snapshot, 65536)
+                collector = snapshot.get('collector')
+                runtime = build_value(collector.get('build')) if isinstance(collector, dict) else None
+            except (OSError, ValueError, TypeError, RecursionError):
+                runtime = None
+            preflight = self._preflight()
+            result.update(installed=True, updater_version=VERSION, current=current,
+                          source_status=source_status, source_error=UpdateError(source_code).public() if source_code else None,
+                          runtime=runtime, preflight=preflight,
                           checked_at=self.checked_at, rollback=rollback_status(self.paths),
                           operation=dict(self.operation) if self.operation else None)
             if self.latest is not None:
@@ -318,10 +359,12 @@ class UpdateManager:
             if not isinstance(payload, dict) or set(payload) != required:
                 raise UpdateError('invalid_request')
             current = self._current()
+            configuration_before = None
             target = None
             if action != 'check':
-                if not current or not fresh_snapshot(self.paths, current):
-                    raise UpdateError('collector_unavailable')
+                configuration_before = self._preflight()
+                if not configuration_before['ready']:
+                    raise UpdateError(configuration_before['code'])
                 if not version(payload.get('version')):
                     raise UpdateError('invalid_request')
                 target = payload['version']
@@ -357,7 +400,7 @@ class UpdateManager:
             except OSError:
                 self.operation = None
                 raise UpdateError('internal_error') from None
-            self.worker = threading.Thread(target=self._work, args=(action, current, self.latest), daemon=False)
+            self.worker = threading.Thread(target=self._work, args=(action, current, self.latest, configuration_before), daemon=False)
             self.worker.start()
             return self.status()
 
@@ -376,7 +419,7 @@ class UpdateManager:
             except OSError:
                 self.operation.update(stage='failed', error=UpdateError('internal_error').public())
 
-    def _work(self, action, before, release):
+    def _work(self, action, before, release, configuration_before=None):
         staging = None
         helper_started = False
         try:
@@ -407,6 +450,11 @@ class UpdateManager:
                 raise UpdateError('interrupted')
             if not fresh_snapshot(self.paths, before):
                 raise UpdateError('collector_unavailable')
+            health = self._preflight()
+            if not health['ready']:
+                raise UpdateError(health['code'])
+            if any(health.get(key) != configuration_before.get(key) for key in ('revision', 'target_identity', 'file_state')):
+                raise UpdateError('configuration_changed')
             self._stage('installing' if action == 'install' else 'rolling_back')
             helper_started = True
             result = self.helper(self.paths, action, before['source_sha256'], source=source, progress=self._stage)
@@ -418,12 +466,17 @@ class UpdateManager:
                 raise UpdateError('recovery_failed')
             if current != target or not fresh_snapshot(self.paths, target):
                 raise UpdateError('recovery_failed')
+            health = self._preflight()
+            if not health['ready']:
+                raise UpdateError(health['code'])
+            if any(health.get(key) != configuration_before.get(key) for key in ('revision', 'target_identity', 'file_state')):
+                raise UpdateError('configuration_changed')
             self._finish(outcome='updated' if action == 'install' else 'rolled_back')
         except ReleaseError as exc:
             self._finish(code=exc.code)
         except UpdateError as exc:
             outcome = ('restored' if exc.code in ('install_failed', 'rollback_failed')
-                       else 'manual_required' if exc.code == 'recovery_failed' else None)
+                       else 'manual_required' if helper_started else None)
             self._finish(code=exc.code, outcome=outcome)
         except Exception:
             self._finish(code='recovery_failed' if helper_started else 'internal_error',

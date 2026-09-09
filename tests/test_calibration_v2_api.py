@@ -164,7 +164,10 @@ def test_snapshot_does_not_accept_v2_metadata_without_matching_config_revision(p
     else:
         value['sample'].pop('calibration_coefficients')
     atomic_json(snapshot, value)
-    assert not load_snapshot(snapshot)['fresh']
+    result = load_snapshot(snapshot)
+    assert result['fresh'] and result['sample']['soc'] == value['sample']['soc']
+    assert not result['calibration_validation']['valid']
+    assert result['sample']['ac_input_estimate_w'] is None
 
 
 def test_voltage_revision_context_survives_history_and_csv_without_rewriting_legacy(tmp_path):

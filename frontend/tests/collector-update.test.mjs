@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { collectorAdminKeyReady, collectorInstallBody, collectorReleaseTarget, collectorReleaseUrl,
   collectorUpdateHttpError, collectorUpdateRequest, collectorVersion, sameCollectorTarget, collectorRollbackBody,
-  collectorUpdateBusy, collectorStageLabel, collectorUpdateError, collectorOperationResult, parseCollectorUpdateStatus } from '../src/collectorUpdate.ts';
+  collectorUpdateBusy, collectorStageLabel, collectorUpdateError, collectorOperationResult, collectorPreflightIssue, collectorHealthChecks, parseCollectorUpdateStatus } from '../src/collectorUpdate.ts';
 
 const target = { version: '0.9.0', release_id: 12345, sha256: 'a'.repeat(64) };
 const key = 's'.repeat(43);
@@ -124,4 +124,69 @@ test('an unsuccessful update with restored or manual-required outcome never clai
   assert.equal(collectorOperationResult({...operation,stage:'interrupted',busy:false,outcome:'manual_required'}),'需要核对采集器状态，并按说明手动处理。');
   assert.match(collectorOperationResult({...operation,stage:'succeeded',busy:false,outcome:'rolled_back'}),/已回退/);
   assert.match(collectorOperationResult({...operation,stage:'succeeded',busy:false,outcome:'updated'}),/已更新/);
+});
+
+test('installed code, runtime report and fixed preflight reasons remain separate and discard exception text', () => {
+  const raw = { ...status, source_status: 'modified', source_error: { code: 'source_modified', message: key },
+    runtime: { version: '0.7.0', revision: 'd'.repeat(40), source_sha256: 'e'.repeat(64), private_key: key },
+    preflight: { ready: false, code: 'source_modified', target_verified: true, private_key: key } };
+  const parsed = parseCollectorUpdateStatus(raw);
+  assert.equal(parsed.current.version, '0.8.0');
+  assert.equal(parsed.runtime.version, '0.7.0');
+  assert.equal(parsed.source_error.message, '');
+  assert.equal(JSON.stringify(parsed).includes(key), false);
+  assert.match(collectorPreflightIssue(parsed), /本地修改/);
+  const noInstalledCode = parseCollectorUpdateStatus({ ...raw, current: null });
+  assert.equal(noInstalledCode.current, null, 'a runtime report must never masquerade as installed code');
+  assert.equal(noInstalledCode.runtime.version, '0.7.0');
+});
+
+test('explicit source or configuration failures block version changes without blocking release checks', () => {
+  for (const code of ['source_modified', 'source_unreadable', 'runtime_mismatch', 'calibration_unconfigured', 'calibration_unreadable',
+    'calibration_incompatible', 'calibration_mismatch', 'calibration_target_unverified', 'calibration_target_mismatch', 'configuration_changed']) {
+    const parsed = parseCollectorUpdateStatus({ ...status, source_status: 'verified', preflight: { ready: false, code, target_verified: false } });
+    assert.ok(collectorPreflightIssue(parsed));
+    assert.notEqual(collectorPreflightIssue(parsed), collectorUpdateHttpError(0));
+    assert.equal(collectorUpdateBusy(parsed), false);
+    assert.equal(parsed.availability, 'ready');
+    assert.equal(collectorUpdateRequest('check', key).url, '/api/collector-update/check');
+  }
+  assert.match(collectorPreflightIssue({ ...status, source_status: 'modified', preflight: { ready: true, code: null, target_verified: true } }), /修改/);
+  assert.equal(collectorPreflightIssue(parseCollectorUpdateStatus(status)), null, 'legacy endpoints without preflight remain compatible');
+  assert.equal(collectorPreflightIssue(parseCollectorUpdateStatus({ ...status, source_status: 'unknown', preflight: { ready: false, code: null, target_verified: false } })), null);
+  const runtimeMismatch = parseCollectorUpdateStatus({ ...status, source_status: 'verified', preflight: { ready: false, code: 'runtime_mismatch', target_verified: true } });
+  assert.match(collectorPreflightIssue(runtimeMismatch), /实际运行.*不一致/);
+  assert.doesNotMatch(collectorPreflightIssue(runtimeMismatch), /本地修改/);
+  assert.equal(runtimeMismatch.source_status, 'verified');
+});
+
+test('malformed extended status cannot become an approval to install', () => {
+  for (const patch of [{ source_status: 'made-up' }, { runtime: { version: 'latest' } }, { preflight: { ready: 'true', code: null, target_verified: true } },
+    { preflight: { ready: true, code: {}, target_verified: true } }, { preflight: { ready: true, code: null, target_verified: 'true' } }]) {
+    assert.equal(parseCollectorUpdateStatus({ ...status, ...patch }), null);
+  }
+});
+
+test('a successful install can independently report a pre-existing history failure and a calibration failure', () => {
+  const checks = [{ id: 'storage', label: '历史写入', status: 'warning', detail: '数据库被占用，请检查是否重复启动面板。' },
+    { id: 'calibration', label: '校准配置', status: 'error', detail: '校准路径不一致。' }];
+  const result = collectorOperationResult({ ...operation, stage: 'succeeded', busy: false, outcome: 'updated' });
+  assert.match(result, /已更新/);
+  const current = collectorHealthChecks(checks, true, true);
+  assert.equal(current[0].status, 'ok');
+  assert.equal(current[1].status, 'error');
+  assert.equal(current[2].status, 'warning');
+  assert.equal(current[2].detail, checks[0].detail);
+  assert.equal(checks.length, 2);
+  assert.match(collectorOperationResult({ ...operation, stage: 'succeeded', busy: false, outcome: 'updated' }), /已更新/);
+});
+
+test('expired, missing and legacy diagnostics never present all update health checks as passed', () => {
+  const checks = [{ id: 'storage', label: '历史写入', status: 'ok', detail: '正常' }, { id: 'calibration', label: '校准配置', status: 'ok', detail: '正常' }];
+  assert.ok(collectorHealthChecks(checks, false, true).every(check => check.status === 'unknown'));
+  const legacy = collectorHealthChecks([checks[0]], true, false);
+  assert.equal(legacy[0].status, 'waiting');
+  assert.equal(legacy[1].status, 'unknown');
+  assert.match(legacy[1].detail, /尚未提供/);
+  assert.equal(legacy[2].status, 'ok');
 });

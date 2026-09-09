@@ -54,6 +54,7 @@ type Props = {
   liveFresh: boolean;
   liveAge: number | null;
   enabled: boolean;
+  disabledReason?: string;
   supportsV2: boolean;
   draft: CalibrationDraft;
   active: CalibrationConfig | null;
@@ -62,7 +63,7 @@ type Props = {
   onApply: (suggestion: AssistantSuggestion) => void;
 };
 
-export default function CalibrationAssistant({ live, liveFresh, liveAge, enabled, supportsV2, draft, active, onVoltageChange, onConfirmVoltage, onApply }: Props) {
+export default function CalibrationAssistant({ live, liveFresh, liveAge, enabled, supportsV2, disabledReason, draft, active, onVoltageChange, onConfirmVoltage, onApply }: Props) {
   const [baseSampling, setBaseSampling] = useState<SamplingState | null>(null);
   const [chargeSampling, setChargeSampling] = useState<SamplingState | null>(null);
   const [baseWatts, setBaseWatts] = useState('');
@@ -139,7 +140,7 @@ export default function CalibrationAssistant({ live, liveFresh, liveAge, enabled
     {!supportsV2 ? <p className="notice" role="status">当前采集器不支持分步校准。请先更新宿主机采集器；下方仍可填写旧版的三个校准系数。</p> : <>
       <p className="calibration-assistant-intro">只填写接在适配器前的智能插座或交流数显功率计读数（W）。让负载保持稳定，观察并记下每次 30 秒采样同期的功率，采样结束后再填写。采样至少需要 12 条独立读数，相关原始读数的波动不能超过均值的 10%。</p>
       <VoltageSelector id="assistant-voltage" voltage={draft.voltage} confirmed={draft.voltageConfirmed} inputVoltage={streamFresh ? sample?.adapter_input_voltage_v : null} disabled={!enabled} onChange={onVoltageChange} onConfirm={onConfirmVoltage} />
-      {!enabled && <p className="notice" role="status">采集器配置尚未就绪或已发生变化，请等待报告恢复；配置冲突时请在下方重新载入。</p>}
+      {!enabled && <p className="notice" role="status">{disabledReason || '校准配置尚未就绪，请查看下方检查结果。'}</p>}
       {enabled && !streamFresh && <p className="notice" role="status">实时采样已中断或超过 5 秒未更新。正在采集的窗口会重置，恢复后可继续；已完成的窗口保持冻结。</p>}
       {contextNotice && <p className="notice" role="status">{contextNotice}</p>}
       <div className="calibration-steps">

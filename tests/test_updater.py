@@ -15,6 +15,8 @@ from types import SimpleNamespace
 import pytest
 
 from ups_panel import updater
+from ups_panel.calibration import default_config
+from ups_panel.config_target import target_identity
 from ups_panel.update_client import UpdateClient, UpdateError, public_status
 
 KEY = 'A' * 43
@@ -39,7 +41,9 @@ def source(directory, version, *, metadata=False):
 def snapshot(paths, build, *, age=0):
     now = time.time() - age
     paths.snapshot.write_text(json.dumps({'schema': 1, 'source': 'usbmon', 'heartbeat': now,
-        'sample': {'timestamp': now}, 'collector': {'build': build}}))
+        'sample': {'timestamp': now, 'calibration_profile': 'none', 'calibration_revision': default_config()['revision']},
+        'collector': {'build': build}, 'calibration': {'configurable': True, 'config': default_config(),
+        'error': None, 'file_state': 'missing', 'config_target': target_identity(paths.config_env.parent / 'calibration.json')}}))
 
 
 def mutation(manager, action, payload=None, key=KEY):
@@ -59,7 +63,9 @@ def rig(tmp_path, monkeypatch):
     os.chown(socket_directory.name, os.getuid(), os.getgid())
     paths = updater.UpdaterPaths(base=tmp_path / 'collector', state=tmp_path / 'state', key=tmp_path / 'key',
         socket=Path(socket_directory.name) / 'control.sock', snapshot=tmp_path / 'snapshot.json',
-        helper=tmp_path / 'trusted' / 'scripts' / 'collector-admin.py', trusted_uid=os.getuid(), socket_gid=os.getgid())
+        helper=tmp_path / 'trusted' / 'scripts' / 'collector-admin.py', config_env=tmp_path / 'collector.env',
+        trusted_uid=os.getuid(), socket_gid=os.getgid())
+    paths.config_env.write_text(f'UPS_CALIBRATION_CONFIG="{tmp_path}/calibration.json"\n')
     paths.key.write_text(KEY + '\n')
     paths.key.chmod(0o600)
     old = paths.base / 'releases' / 'old'
@@ -419,3 +425,117 @@ def test_real_unix_socket_round_trip_permissions_auth_and_bounded_frames(rig):
         finally:
             server.shutdown()
             thread.join()
+
+
+def test_source_tamper_retains_actual_installed_identity_and_separate_runtime(rig):
+    payload = checked(rig)
+    (rig.old / 'collector-release.json').write_text(json.dumps(dict(rig.old_build, revision='c' * 40)))
+    (rig.old / 'ups_panel/collector.py').write_text('# local patch\n')
+    status = rig.manager.status()
+    assert status['source_status'] == 'modified'
+    assert status['source_error']['code'] == 'source_modified'
+    assert status['runtime'] == rig.old_build
+    assert status['current']['source_sha256'] != rig.old_build['source_sha256']
+    with pytest.raises(UpdateError) as error:
+        mutation(rig.manager, 'install', payload)
+    assert error.value.code == 'source_modified'
+    assert not rig.helper_state.calls and rig.client.downloads == 0
+
+
+def test_unreadable_source_is_not_replaced_with_runtime_identity(rig):
+    (rig.old / 'ups_panel').rename(rig.old / 'missing-package')
+    status = rig.manager.status()
+    assert status['current'] is None and status['runtime'] == rig.old_build
+    assert status['source_status'] == 'unreadable'
+    assert status['preflight']['code'] == 'source_unreadable'
+
+
+def test_old_running_process_is_distinguished_from_modified_installed_source(rig):
+    payload = checked(rig)
+    value = json.loads(rig.paths.snapshot.read_text())
+    value['collector']['build']['version'] = '0.7.0'
+    rig.paths.snapshot.write_text(json.dumps(value))
+    status = rig.manager.status()
+    assert status['source_status'] == 'unverified' and status['source_error'] is None
+    assert status['current'] == rig.old_build
+    assert status['runtime']['version'] == '0.7.0'
+    assert status['preflight']['code'] == 'runtime_mismatch'
+    with pytest.raises(UpdateError) as error:
+        mutation(rig.manager, 'install', payload)
+    assert error.value.code == 'runtime_mismatch'
+    assert not rig.helper_state.calls and rig.client.downloads == 0
+
+
+@pytest.mark.parametrize('fault,code', [('no_path', 'calibration_unconfigured'),
+    ('unreadable_parent', 'calibration_unreadable'), ('unknown_profile', 'calibration_incompatible'),
+    ('unknown_schema', 'calibration_incompatible'), ('missing_metadata', 'calibration_unconfigured'),
+    ('wrong_target', 'calibration_mismatch'), ('wrong_revision', 'calibration_mismatch')])
+def test_preflight_blocks_configuration_faults_before_download_or_service_change(rig, fault, code):
+    payload = checked(rig)
+    value = json.loads(rig.paths.snapshot.read_text())
+    if fault == 'no_path': rig.paths.config_env.write_text('UPS_CALIBRATION_PROFILE=none\n')
+    elif fault == 'unreadable_parent':
+        rig.paths.config_env.write_text(f'UPS_CALIBRATION_CONFIG="{rig.paths.config_env.parent}/absent/calibration.json"\n')
+    elif fault in ('unknown_profile', 'unknown_schema'):
+        config = default_config()
+        config['profile' if fault == 'unknown_profile' else 'schema'] = 'local-12v-v1' if fault == 'unknown_profile' else 99
+        (rig.paths.config_env.parent / 'calibration.json').write_text(json.dumps(config))
+    elif fault == 'missing_metadata': value.pop('calibration')
+    elif fault == 'wrong_target': value['calibration']['config_target']['identity'] = 'a' * 64
+    else: value['sample']['calibration_revision'] = 'a' * 64
+    rig.paths.snapshot.write_text(json.dumps(value))
+    assert rig.manager.status()['preflight']['code'] == code
+    with pytest.raises(UpdateError) as error:
+        mutation(rig.manager, 'install', payload)
+    assert error.value.code == code
+    assert not rig.helper_state.calls and rig.client.downloads == 0
+    assert str(rig.paths.config_env.parent) not in json.dumps(rig.manager.status())
+
+
+def test_legacy_metadata_can_upgrade_with_matching_content_and_no_saved_file(rig):
+    value = json.loads(rig.paths.snapshot.read_text())
+    value['calibration'].pop('config_target')
+    value['calibration'].pop('file_state')
+    rig.paths.snapshot.write_text(json.dumps(value))
+    status = rig.manager.status()
+    assert status['source_status'] == 'unverified'
+    assert status['preflight'] == {'ready': True, 'code': None, 'target_verified': False}
+    mutation(rig.manager, 'install', checked(rig))
+    assert wait(rig.manager)['operation']['outcome'] == 'updated'
+
+
+def test_configuration_change_during_download_is_detected_even_when_new_content_is_valid(rig):
+    payload = checked(rig)
+    download = rig.client.download
+    def changed(release):
+        encoded = download(release)
+        config = default_config('local-19v-v1')
+        (rig.paths.config_env.parent / 'calibration.json').write_text(json.dumps(config))
+        value = json.loads(rig.paths.snapshot.read_text())
+        value['calibration'].update(config=config, file_state='loaded')
+        value['sample'].update(calibration_profile=config['profile'], calibration_revision=config['revision'],
+                               calibration_coefficients=config['coefficients'])
+        rig.paths.snapshot.write_text(json.dumps(value))
+        return encoded
+    rig.client.download = changed
+    mutation(rig.manager, 'install', payload)
+    status = wait(rig.manager)
+    assert status['operation']['error']['code'] == 'configuration_changed'
+    assert status['current'] == rig.old_build and not rig.helper_state.calls
+
+
+def test_post_update_configuration_fault_does_not_trigger_blind_rollback_or_claim_history_fault(rig):
+    helper = rig.manager.helper
+    def changed(*args, **kwargs):
+        result = helper(*args, **kwargs)
+        value = json.loads(rig.paths.snapshot.read_text())
+        value['calibration']['config_target']['identity'] = 'a' * 64
+        rig.paths.snapshot.write_text(json.dumps(value))
+        return result
+    rig.manager.helper = changed
+    mutation(rig.manager, 'install', checked(rig))
+    status = wait(rig.manager)
+    assert status['current'] == rig.new_build
+    assert status['operation']['error']['code'] == 'calibration_mismatch'
+    assert status['operation']['outcome'] == 'manual_required'
+    assert rig.helper_state.calls == ['install']

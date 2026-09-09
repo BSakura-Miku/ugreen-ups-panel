@@ -47,7 +47,7 @@ def admin(tmp_path, monkeypatch):
         ownership_calls.append((uid, gid))
     monkeypatch.setattr(module.os, 'fchown', set_directory_owner)
     module.test_validate_fresh = module.validate_fresh
-    monkeypatch.setattr(module, 'validate_fresh', lambda started: None)
+    monkeypatch.setattr(module, 'validate_fresh', lambda started, **kwargs: None)
     source = tmp_path / 'source'
     (source / 'ups_panel').mkdir(parents=True)
     for filename in ('__init__.py', 'collector.py', 'protocol.py', 'power.py', 'calibration.py', 'usbmon.py', 'build_info.py', 'doctor.py'):
@@ -58,13 +58,15 @@ def admin(tmp_path, monkeypatch):
         (source / 'deploy' / filename).write_text('new ' + name + '\n')
     old = base / 'releases' / 'old'
     old.mkdir(parents=True)
+    (old / 'ups_panel').mkdir()
+    (old / 'ups_panel/build_info.py').write_text("VERSION = 'old'\n")
     older = base / 'releases' / 'older'
     older.mkdir()
     (base / 'current').symlink_to('releases/old')
     (base / 'previous').symlink_to('releases/older')
     configs['service'].write_text('old service\n')
     configs['tmpfiles'].write_text('old tmpfiles\n')
-    configs['env'].write_text('UPS_NUT_TARGET=office@localhost\nUPS_CALIBRATION_PROFILE=local-19v-v1\n')
+    configs['env'].write_text('UPS_NUT_TARGET=office@localhost\nUPS_CALIBRATION_PROFILE=local-19v-v1\n' + f'UPS_CALIBRATION_CONFIG="{source}/data/calibration.json"\n')
     configs['env'].chmod(0o640)
     module.test_source = source
     module.test_expected_data = source / 'data'
@@ -89,7 +91,7 @@ def test_failed_install_restores_code_service_environment_and_service_state(admi
     admin.test_systemd['enabled'] = False
     before = state(admin)
 
-    def fail_validation(started):
+    def fail_validation(started, **kwargs):
         assert (admin.BASE / 'current').readlink() != before['current']
         assert admin.CONFIGS['service'].read_text() == 'new service\n'
         assert 'UPS_CALIBRATION_PROFILE=none' in admin.CONFIGS['env'].read_text()
@@ -106,7 +108,8 @@ def test_unspecified_profile_preserves_existing_environment(admin):
     original = admin.CONFIGS['env'].read_text()
     old = (admin.BASE / 'current').readlink()
     admin.install(admin.test_source)
-    assert admin.CONFIGS['env'].read_text().startswith(original)
+    assert 'UPS_NUT_TARGET=office@localhost' in admin.CONFIGS['env'].read_text()
+    assert 'UPS_CALIBRATION_PROFILE=local-19v-v1' in admin.CONFIGS['env'].read_text()
     assert f'UPS_CALIBRATION_CONFIG="{admin.test_source}/data/calibration.json"' in admin.CONFIGS['env'].read_text()
     assert (admin.BASE / 'previous').readlink() == old
     assert (admin.BASE / 'current').resolve().name != 'old'
@@ -118,7 +121,7 @@ def test_failed_rollback_recovers_current_release_and_configs(admin, monkeypatch
     admin.install(admin.test_source, 'none')
     before = state(admin)
 
-    def reject_old(started):
+    def reject_old(started, **kwargs):
         assert (admin.BASE / 'current').readlink() == Path('releases/old')
         assert 'UPS_CALIBRATION_PROFILE=local-19v-v1' in admin.CONFIGS['env'].read_text()
         raise RuntimeError('previous release is unhealthy')
@@ -148,7 +151,7 @@ def test_failed_recovery_retains_rescue_configuration(admin, monkeypatch):
         return original_restore(directory)
 
     monkeypatch.setattr(admin, 'restore_state', restore)
-    monkeypatch.setattr(admin, 'validate_fresh', lambda started: (_ for _ in ()).throw(RuntimeError('bad release')))
+    monkeypatch.setattr(admin, 'validate_fresh', lambda started, **kwargs: (_ for _ in ()).throw(RuntimeError('bad release')))
     with pytest.raises(RuntimeError, match='Recovery files retained'):
         admin.rollback()
     rescues = list(admin.BASE.glob('rollback-rescue-*'))
@@ -164,7 +167,7 @@ def test_fresh_install_failure_removes_new_configs_and_keeps_service_stopped(adm
     for path in admin.CONFIGS.values():
         path.unlink()
     admin.test_systemd.update(active=False, enabled=False)
-    monkeypatch.setattr(admin, 'validate_fresh', lambda started: (_ for _ in ()).throw(RuntimeError('no UPS')))
+    monkeypatch.setattr(admin, 'validate_fresh', lambda started, **kwargs: (_ for _ in ()).throw(RuntimeError('no UPS')))
     with pytest.raises(RuntimeError):
         admin.install(admin.test_source)
     assert not (admin.BASE / 'current').exists()
@@ -267,3 +270,75 @@ def test_relative_data_directory_is_rejected_before_service_changes(admin):
         admin.install(admin.test_source, data_dir=Path('relative/data'))
     assert state(admin) == before
     assert not any(call[0] == 'systemctl' for call in admin.test_calls)
+
+
+def test_old_install_missing_saved_path_requires_existing_data_directory(admin):
+    admin.CONFIGS['env'].write_text('UPS_CALIBRATION_PROFILE=none\n')
+    before = state(admin)
+    with pytest.raises(ValueError, match='specify --data-dir'):
+        admin.install(admin.test_source)
+    assert state(admin) == before
+    assert not (admin.test_source / 'data').exists()
+
+
+@pytest.mark.parametrize('fault,reason', [
+    ('wrong_version', 'source version and fingerprint'),
+    ('wrong_hash', 'source version and fingerprint'),
+    ('missing_target', 'calibration_target_unverified'),
+    ('wrong_target', 'calibration_mismatch'),
+    ('unconfigured', 'calibration_unconfigured'),
+])
+def test_fresh_telemetry_cannot_hide_wrong_running_code_or_configuration(admin, monkeypatch, fault, reason):
+    from types import SimpleNamespace
+    from ups_panel.calibration import default_config
+    from ups_panel.collector import CalibrationState
+    target = admin.test_source / 'calibration.json'
+    calibration = CalibrationState(target)
+    calibration.refresh()
+    build = {'version': '0.13.0', 'source_sha256': 'a' * 64}
+    payload = {'schema': 1, 'source': 'usbmon', 'heartbeat': 100,
+               'collector': {'build': dict(build)}, 'calibration': calibration.snapshot(),
+               'sample': {'timestamp': 100, 'calibration_profile': 'none',
+                          'calibration_revision': default_config()['revision']}}
+    if fault == 'wrong_version': payload['collector']['build']['version'] = '0.12.0'
+    elif fault == 'wrong_hash': payload['collector']['build']['source_sha256'] = 'b' * 64
+    elif fault == 'missing_target': payload['calibration'].pop('config_target')
+    elif fault == 'wrong_target': payload['calibration']['config_target']['identity'] = 'b' * 64
+    else: payload['calibration']['configurable'] = False
+    admin.SNAPSHOT.write_text(json.dumps(payload))
+    ticks = iter([0, 0, 2])
+    monkeypatch.setattr(admin, 'time', SimpleNamespace(monotonic=lambda: next(ticks), time=lambda: 100, sleep=lambda _: None))
+    with pytest.raises(RuntimeError, match=reason):
+        admin.test_validate_fresh(99, timeout=1, expected_build=build, calibration_path=target, require_target=True)
+
+
+def test_install_restores_previous_service_when_systemd_override_reads_another_target(admin, monkeypatch):
+    from types import SimpleNamespace
+    import itertools
+    from ups_panel.calibration import default_config
+    from ups_panel.collector import CalibrationState
+    before = state(admin)
+    (admin.test_source / 'ups_panel/config_target.py').write_text('# target metadata supported\n')
+    unexpected_target = admin.test_source / 'another-calibration.json'
+    metadata = CalibrationState(unexpected_target)
+    metadata.refresh()
+    original_command = admin.command
+    def command(*args, check=True):
+        result = original_command(*args, check=check)
+        if args[:2] == ('systemctl', 'restart'):
+            admin.SNAPSHOT.write_text(json.dumps({'schema': 1, 'source': 'usbmon', 'heartbeat': 100,
+                'collector': {'build': admin.source_build(admin.BASE / 'current')},
+                'calibration': metadata.snapshot(), 'sample': {'timestamp': 100,
+                    'calibration_profile': 'none', 'calibration_revision': default_config()['revision']}}))
+        return result
+    ticks = itertools.count()
+    clock = SimpleNamespace(time=lambda: 100, monotonic=lambda: next(ticks), sleep=lambda _: None,
+                            strftime=admin.time.strftime)
+    monkeypatch.setattr(admin, 'command', command)
+    monkeypatch.setattr(admin, 'time', clock)
+    monkeypatch.setattr(admin, 'validate_fresh', admin.test_validate_fresh)
+    with pytest.raises(RuntimeError, match='calibration_mismatch'):
+        admin.install(admin.test_source, 'none')
+    assert state(admin) == before
+    assert not unexpected_target.exists()
+    assert not list((admin.test_source / 'data').iterdir())
