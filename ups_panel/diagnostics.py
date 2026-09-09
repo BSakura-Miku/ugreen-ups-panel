@@ -302,7 +302,11 @@ def diagnostic_export(diagnostic):
         'privacy': {'mode': 'allowlist', 'omitted': ['serial', 'addresses', 'usb_paths', 'nut_target',
                                                     'free_text_alarms', 'full_raw_frames']},
         'versions': safe_versions, 'connection': diagnostic['connection'],
-        'calibration_readiness': diagnostic.get('calibration_readiness'),
+        'calibration_readiness': ({'ready': diagnostic['calibration_readiness']['ready'],
+            'can_save': diagnostic['calibration_readiness']['can_save'],
+            'code': diagnostic['calibration_readiness']['code'],
+            'target_state': diagnostic['calibration_readiness']['target']}
+            if diagnostic.get('calibration_readiness') else None),
         'storage': diagnostic.get('storage'),
         'system': {'available': system['available'], 'fresh': system['fresh'],
                    'status_tokens': system['status_tokens'], 'values': values,

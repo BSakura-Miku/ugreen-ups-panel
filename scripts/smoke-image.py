@@ -11,6 +11,7 @@ All HTTP checks run inside an isolated container against its own loopback port.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -65,8 +66,11 @@ def require_local_daemon():
 
 def snapshot(timestamp: float) -> dict:
     """Synthetic UI/storage fixture; no household telemetry or device identity."""
+    config = {'schema': 1, 'profile': 'none', 'coefficients': None}
+    config['revision'] = hashlib.sha256(json.dumps(config, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     return {
         'schema': 1, 'heartbeat': timestamp, 'source': 'replay',
+        'calibration': {'config': config, 'configurable': False, 'error': None},
         'device': {'serial': 'SMOKE-TEST'},
         'nut': {'available': False, 'timestamp': 0, 'values': {}},
         'diagnostics': {'frames': 1, 'dropped': 0, 'rejected': 0},
@@ -81,6 +85,7 @@ def snapshot(timestamp: float) -> dict:
             'power_verified': False, 'current_verified': False,
             'decoder_version': 4, 'formula_version': 2, 'warnings': [],
             'calibration_profile': 'none', 'calibration_verified': False,
+            'calibration_revision': config['revision'], 'calibration_coefficients': None,
             'ac_input_estimate_w': None, 'ac_estimate_model': None,
             'ac_estimate_quality': 'not_configured', 'ac_estimate_window_sec': 8,
             'battery_energy_estimate_w': None, 'battery_estimate_basis': None,
@@ -192,6 +197,7 @@ live = json.loads(live_bytes)
 assert live['fresh'] and live['source'] == 'replay'
 assert live['device']['serial'] == 'SMOKE-TEST' and not live['nut']['available']
 assert live['sample']['calibration_profile'] == 'none'
+assert live['calibration_validation']['valid'], 'Complete calibration metadata was not accepted'
 assert live['sample']['ac_input_estimate_w'] is None and live['sample']['battery_energy_estimate_w'] is None
 assert live['sample']['ac_estimate_quality'] == 'not_configured'
 assert live_headers.get('cache-control') == 'no-store', 'Live responses must disable caching'
@@ -261,6 +267,15 @@ def check_v2_calibration(directory):
         assert loaded['fresh'] and loaded['sample']['calibration_revision'] == config['revision']
         assert loaded['sample']['calibration_coefficients']['charge_gain'] is None
         assert loaded['sample']['calibration_coefficients']['battery_gain'] is None
+
+        invalid = json.loads(snapshot_path.read_text())
+        invalid['sample']['calibration_profile'] = 'unsupported-smoke-profile'
+        snapshot_path.write_text(json.dumps(invalid))
+        isolated = load_snapshot(snapshot_path, now=107)
+        assert isolated['fresh'] and isolated['sample']['soc'] == sample['soc']
+        assert isolated['calibration_validation']['reason'] == 'unsupported_profile'
+        assert isolated['sample']['ac_input_estimate_w'] is None
+        assert 'calibration_profile' not in isolated['sample']
 
         for timestamp, mode, quality_field, quality in (
                 (108, 'charging', 'ac_estimate_quality', 'charge_not_configured'),
