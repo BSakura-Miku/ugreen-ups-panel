@@ -4,7 +4,7 @@ import type { CollectorUpdateStatus, DiagnosticBuild, DiagnosticCheck } from './
 import { diagnosticTime, diagnosticVersion } from './diagnosticDisplay';
 import { COLLECTOR_UPDATE_DOCS, collectorAdminKeyReady, collectorOperationResult, collectorReleaseTarget, collectorReleaseUrl,
   collectorRollbackBody, collectorStageLabel, collectorUpdateBusy, collectorUpdateError, collectorUpdateRequest,
-  collectorHealthChecks, collectorPreflightIssue, parseCollectorUpdateStatus, sameCollectorTarget } from './collectorUpdate';
+  collectorHealthChecks, collectorPreflightIssue, parseCollectorUpdateStatus, sameCollectorTarget, collectorConnectionNotice } from './collectorUpdate';
 import type { CollectorReleaseTarget, CollectorRollbackTarget, CollectorUpdateAction } from './collectorUpdate';
 
 type Intent = { action: 'install'; target: CollectorReleaseTarget; fromVersion: string }
@@ -95,10 +95,7 @@ function CollectorUpdateContent({ fallbackCurrent, diagnosticsFresh = false, cap
   const healthChecks = collectorHealthChecks(checks, diagnosticsFresh, captureFresh);
   const recoveryWarning = operation?.outcome === 'restored' || operation?.outcome === 'manual_required'
     || operation?.stage === 'failed' || operation?.stage === 'interrupted';
-  const serviceNotice = status?.availability === 'not_installed'
-    ? '尚未安装采集器更新服务。先在 NAS 上完成一次安装，即可从这里检查、更新和回退采集器。'
-    : status?.availability === 'unreachable' ? '更新服务当前无法连接，请按说明检查 NAS 上的服务。'
-    : status?.availability === 'incompatible' ? '更新服务与此面板不兼容，请按说明升级更新服务。' : '';
+  const serviceNotice = collectorConnectionNotice(status);
 
   const controlsAvailable = status?.installed === true && status.availability === 'ready';
   useEffect(() => {

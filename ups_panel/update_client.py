@@ -92,8 +92,12 @@ def build_value(value):
             'source_sha256': hex_value(value.get('source_sha256'), 64)}
 
 
-def unavailable(availability='not_installed'):
+def unavailable(availability='not_installed', reason=None):
+    # installed is a legacy availability flag, not proof of host installation.
+    reason = reason or {'ready': 'connected', 'not_installed': 'endpoint_missing',
+                        'unreachable': 'connection_failed', 'incompatible': 'protocol_incompatible'}[availability]
     return {'schema': SCHEMA, 'installed': False, 'availability': availability,
+            'connection_reason': reason, 'installation_status': 'unknown',
             'updater_version': None, 'updater_schema': SCHEMA, 'current': None,
             'source_status': 'unknown', 'source_error': None, 'runtime': None,
             'preflight': {'ready': False, 'code': None, 'target_verified': False},
@@ -108,7 +112,7 @@ def public_status(value):
             or not version(value.get('updater_version'))):
         raise UpdateError('incompatible_service')
     result = unavailable('ready')
-    result.update(installed=True, updater_version=value['updater_version'],
+    result.update(installed=True, installation_status='confirmed', updater_version=value['updater_version'],
                   current=build_value(value.get('current')), checked_at=timestamp(value.get('checked_at')))
     result['runtime'] = build_value(value.get('runtime'))
     source_status = value.get('source_status')
@@ -195,6 +199,18 @@ class UpdateClient:
         except FileNotFoundError:
             if action == 'status':
                 return unavailable('not_installed')
+            raise UpdateError('service_unavailable') from None
+        except PermissionError:
+            if action == 'status':
+                return unavailable('unreachable', 'permission_denied')
+            raise UpdateError('service_unavailable') from None
+        except ConnectionRefusedError:
+            if action == 'status':
+                return unavailable('unreachable', 'connection_refused')
+            raise UpdateError('service_unavailable') from None
+        except TimeoutError:
+            if action == 'status':
+                return unavailable('unreachable', 'timeout')
             raise UpdateError('service_unavailable') from None
         except (OSError, TimeoutError):
             if action == 'status':

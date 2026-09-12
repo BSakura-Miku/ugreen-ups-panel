@@ -179,6 +179,11 @@ export function parseCollectorUpdateStatus(value: unknown): CollectorUpdateStatu
       error: isObject(item.error) && typeof item.error.code === 'string' ? { code: item.error.code.slice(0, 80), message: '' } : null };
   }
   const extended: Partial<CollectorUpdateStatus> = {};
+  if (typeof value.connection_reason === 'string' && ['connected', 'endpoint_missing', 'connection_failed',
+    'permission_denied', 'connection_refused', 'timeout', 'protocol_incompatible'].includes(value.connection_reason)) {
+    extended.connection_reason = value.connection_reason;
+  }
+  if (value.installation_status === 'unknown' || value.installation_status === 'confirmed') extended.installation_status = value.installation_status;
   if (value.source_status !== undefined) {
     if (!['verified', 'unverified', 'modified', 'unreadable', 'unknown'].includes(String(value.source_status))) return null;
     extended.source_status = value.source_status as CollectorUpdateStatus['source_status'];
@@ -211,4 +216,18 @@ export function collectorUpdateHttpError(status: number): string {
   if (status === 400 || status === 422) return '此更新请求暂不可用，请重新检查发行版本。';
   if (status === 429) return '操作过于频繁，请稍后再试。';
   return '操作未能完成，请查看最新状态后再试。';
+}
+
+export function collectorConnectionNotice(status: CollectorUpdateStatus | null): string {
+  const messages: Record<string, string> = {
+    endpoint_missing: '面板未找到更新服务入口，请检查是否已配置服务挂载；无法据此确认宿主是否安装。',
+    permission_denied: '面板没有权限访问更新服务，请检查挂载目录与服务入口的组权限。',
+    connection_refused: '更新服务入口拒绝连接，请检查宿主服务是否正在监听。',
+    timeout: '更新服务响应超时，请检查宿主服务的运行状态。',
+    connection_failed: '更新服务当前无法连接，请检查宿主服务与挂载配置。',
+    protocol_incompatible: '更新服务与此面板不兼容，请按说明升级更新服务。',
+  };
+  const reason = status?.connection_reason || ({ not_installed: 'endpoint_missing', unreachable: 'connection_failed',
+    incompatible: 'protocol_incompatible', ready: 'connected' }[status?.availability || 'ready']);
+  return Object.hasOwn(messages, reason) ? messages[reason] : '';
 }

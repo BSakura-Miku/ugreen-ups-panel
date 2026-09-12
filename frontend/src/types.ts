@@ -301,6 +301,8 @@ export type CollectorUpdateAvailability = 'ready' | 'not_installed' | 'unreachab
 export type CollectorUpdateStage = 'checking' | 'downloading' | 'verifying' | 'installing' | 'restarting' | 'validating'
   | 'rolling_back' | 'succeeded' | 'failed' | 'interrupted';
 export type CollectorUpdateStatus = {
+  connection_reason?: string;
+  installation_status?: 'unknown' | 'confirmed';
   schema: 1;
   installed: boolean;
   availability: CollectorUpdateAvailability;
