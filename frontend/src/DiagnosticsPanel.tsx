@@ -3,6 +3,9 @@ import { Activity, ArrowDownToLine, Cable, Cpu, Info, Radio } from 'lucide-react
 import type { DiagnosticBuild, DiagnosticCheck, DiagnosticView, RawObservationPoint } from './types';
 import { buildRawTrace, diagnosticCount, diagnosticTime, diagnosticVersion, rawChannelLabel, runtimeObservation } from './diagnosticDisplay';
 import CollectorUpdatePanel from './CollectorUpdatePanel';
+import { readJson, startVisiblePolling } from './readPolling';
+import { mergeObservation } from './observationStream';
+import type { ObservationStream } from './observationStream';
 
 const modes: Record<string, string> = { online: '外部供电', charging: '充电', battery: '电池供电', unknown: '工况未知' };
 const checkLabels: Record<DiagnosticCheck['status'], string> = { ok: '已确认', waiting: '等待', warning: '需关注', unknown: '未知', error: '异常' };
@@ -65,6 +68,9 @@ function RawTrend({ points }: { points: RawObservationPoint[] }) {
 }
 
 function DiagnosticsContent() {
+  const [expanded, setExpanded] = useState(false);
+  const [stream, setStream] = useState<ObservationStream | null>(null);
+  const [streamError, setStreamError] = useState('');
   const [minutes, setMinutes] = useState<15 | 60>(60);
   const [data, setData] = useState<DiagnosticView | null>(null);
   const [receivedAt, setReceivedAt] = useState(0);
@@ -77,31 +83,28 @@ function DiagnosticsContent() {
     return () => clearInterval(timer);
   }, []);
   useEffect(() => {
-    let stopped = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let controller: AbortController | undefined;
-    setData(null);
-    setError('');
-    const poll = async () => {
-      controller = new AbortController();
-      const timeout = setTimeout(() => controller?.abort(), 8000);
+    setData(null); setError('');
+    return startVisiblePolling(async signal => {
       try {
-        const response = await fetch(`/api/diagnostics?minutes=${minutes}`, { signal: controller.signal, cache: 'no-store' });
-        if (!response.ok) throw new Error(response.status === 404 ? '此面板尚未提供诊断接口，请升级面板后重试。' : '诊断查询暂不可用，正在自动重试。');
-        const next = await response.json() as DiagnosticView;
+        const next = await readJson<DiagnosticView>(`/api/diagnostics/summary?minutes=${minutes}`, signal);
         if (next?.schema !== 1 || !next.versions || !next.connection || !next.system || next.observation?.schema !== 1
-          || !Array.isArray(next.connection.checks) || !Array.isArray(next.observation.points)) throw new Error('诊断数据格式暂不兼容，请检查面板版本。');
-        if (!stopped) { setData(next); setReceivedAt(Date.now()); setClock(Date.now()); setError(''); }
-      } catch (cause) {
-        if (!stopped) setError(cause instanceof Error && cause.name !== 'AbortError' ? cause.message : '诊断查询超时，正在自动重试。');
-      } finally {
-        clearTimeout(timeout);
-        if (!stopped) timer = setTimeout(poll, 2500);
-      }
-    };
-    void poll();
-    return () => { stopped = true; clearTimeout(timer); controller?.abort(); };
+          || !Array.isArray(next.connection.checks)) throw new Error('诊断数据格式暂不兼容。');
+        if (!signal.aborted) { setData(next); setReceivedAt(Date.now()); setClock(Date.now()); setError(''); }
+      } catch { if (!signal.aborted) setError('诊断查询暂不可用，正在自动重试。'); }
+    }, () => 2500);
   }, [minutes]);
+  useEffect(() => {
+    let current: ObservationStream | null = null;
+    setStream(null); setStreamError('');
+    if (!expanded) return;
+    return startVisiblePolling(async signal => {
+      try {
+        const cursor = current ? `&cursor=${encodeURIComponent(current.cursor)}` : '';
+        const next = await readJson<ObservationStream>(`/api/diagnostics/observation?minutes=${minutes}${cursor}`, signal);
+        if (!signal.aborted) { current = mergeObservation(current, next); setStream(current); setStreamError(''); }
+      } catch { if (!signal.aborted) setStreamError('观测曲线暂未更新，正在重试；已有曲线仅供回看。'); }
+    }, () => 2500);
+  }, [minutes, expanded]);
 
   const sinceResponse = Math.max(0, (clock - receivedAt) / 1000);
   const responseFresh = !!data && !error && sinceResponse <= 10;
@@ -115,7 +118,7 @@ function DiagnosticsContent() {
     && finite(connection?.nut_query_age_sec) && connection.nut_query_age_sec + sinceResponse <= 45;
   const versions = data?.versions;
   const counters = Object.entries(connection?.counters || {});
-  const points = observation?.points || [];
+  const points = stream?.points || [];
   const systemValues = Object.entries(system?.values || {});
 
   async function download(format: 'json' | 'csv') {
@@ -186,11 +189,12 @@ function DiagnosticsContent() {
       <div className="diag-alarm"><span>系统告警原文</span><p>{systemFresh ? system?.alarm_text || '当前查询未提供告警原文。' : '当前系统查询不可用。'}</p></div>
       {!!systemValues.length && <details className="diag-details"><summary>查看系统字段原值{!systemFresh ? '（最近一次查询，非当前值）' : ''}</summary><dl className="diag-values diag-system-raw">{systemValues.map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl></details>}
     </article>
-    <details className="panel diag-card diag-observation" aria-labelledby="diag-observation-heading">
+    <details className="panel diag-card diag-observation" aria-labelledby="diag-observation-heading" onToggle={event => setExpanded(event.currentTarget.open)}>
       <summary><span id="diag-observation-heading"><Activity size={18}/>原始通道短时观测</span><span className="diag-summary-note">疑似温度，未验证</span></summary>
       <p className="diag-note">通道 A / B 分别是从 0 开始计数的单字节 26 / 27。物理量、单位和测点均未确认，不能当作电池温度、板温或温度探头。</p>
       <div className="diag-observation-head"><div className="diag-channel-values"><div><span>A · 字节 26</span><strong>{rawChannelLabel(latest?.byte_26, rawFresh)}</strong><small>无单位原值</small></div><div><span>B · 字节 27</span><strong>{rawChannelLabel(latest?.byte_27, rawFresh)}</strong><small>无单位原值</small></div></div><div className="range diag-range" aria-label="原始观测时间范围">{([15, 60] as const).map(value => <button key={value} aria-pressed={minutes === value} className={minutes === value ? 'active' : ''} onClick={() => setMinutes(value)}>{value} 分钟</button>)}</div></div>
       <p className="diag-note">{rawFresh ? `${modes[latest?.mode || 'unknown'] || modes.unknown} · 最新读数 ${diagnosticTime(latest?.timestamp)}${latest?.observed === false ? ' · 正等待进入观测窗口' : ''}` : '当前原始通道数据不可用或已失鲜；下方仅保留已有观测。'}</p>
+      {streamError && <p role="status" className="diag-error">{streamError}</p>}
       <RawTrend points={points}/>
       <div className="diag-observation-stats"><span>观测样本 <strong>{diagnosticCount(observation?.count)}</strong></span><span>采样缺口 <strong>{diagnosticCount(observation?.gap_count)}</strong></span><span>冲突 / 拒绝 <strong>{diagnosticCount(observation?.conflict_count)} / {diagnosticCount(observation?.rejected_count)}</strong></span></div>
       <p className="diag-note">{observation?.count ? `实际记录 ${diagnosticTime(observation.first_timestamp, true)} 至 ${diagnosticTime(observation.last_timestamp, true)}。` : '尚无已记录样本。'}当前显示最近 {minutes} 分钟；后台最多保留 60 分钟、4096 点内存观测，重启后重新开始，无需浏览器持续打开。阶梯线不平滑，采样缺口、身份变化与工况切换处断开，不补齐缺失时段。{observation?.truncated ? '当前窗口已受样本上限限制，仅包含保留的部分。' : ''}</p>

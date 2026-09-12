@@ -2,6 +2,17 @@ import csv
 import importlib
 import io
 import json
+
+
+def test_summary_is_small_and_compression_preserves_legacy_diagnostics(tmp_path):
+    client = TestClient(app_module.create_app(tmp_path / 'missing.json', tmp_path / 'history.sqlite', tmp_path))
+    summary = client.get('/api/diagnostics/summary')
+    assert summary.status_code == 200 and len(summary.content) < 20000
+    assert summary.json()['observation']['points'] == []
+    assert summary.headers.get('content-encoding') == 'gzip'
+    stream = client.get('/api/diagnostics/observation').json()
+    assert stream['reset'] and stream['points'] == []
+    assert client.get('/api/diagnostics/observation?cursor=' + 'x' * 65).status_code == 422
 from pathlib import Path
 import sqlite3
 import time

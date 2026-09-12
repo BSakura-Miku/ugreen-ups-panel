@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 
 from .storage import CONTEXT_FIELDS, Store, METRICS
 from .telemetry import load_snapshot
@@ -83,6 +84,7 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
                     LOG.exception('History flush failed')
 
     app = FastAPI(title='US3000 监控面板', lifespan=lifespan, docs_url=None, redoc_url=None)
+    app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
     install_update_routes(app, lambda: load_snapshot(snapshot),
                           calibration_status=lambda: assess_calibration(load_snapshot(snapshot), calibration))
 
@@ -125,10 +127,10 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
                 'storage_error_code': state['storage_error_code'], 'storage': storage_status(state),
                 'storage_dropped_buckets': state['store'].dropped_buckets if state['store'] else 0}
 
-    def diagnostics_data(minutes):
+    def diagnostics_data(minutes, include_points=True):
         view = load_snapshot(snapshot)
         now = view['server_time']
-        observation = raw_observation.snapshot(view, now=now, minutes=minutes)
+        observation = raw_observation.snapshot(view, now=now, minutes=minutes, include_points=include_points)
         return diagnostic_view(view, observation, now=now,
                                storage_ready=bool(state['last_success']),
                                storage_error=state['storage_error'], storage_error_code=state['storage_error_code'],
@@ -137,6 +139,15 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
     @app.get('/api/diagnostics')
     def diagnostics(minutes: int = Query(60, ge=1, le=60)):
         return diagnostics_data(minutes)
+
+    @app.get('/api/diagnostics/summary')
+    def diagnostics_summary(minutes: int = Query(60, ge=1, le=60)):
+        return diagnostics_data(minutes, include_points=False)
+
+    @app.get('/api/diagnostics/observation')
+    def diagnostics_observation(minutes: int = Query(60, ge=1, le=60), cursor: str = Query(None, max_length=64)):
+        view = load_snapshot(snapshot)
+        return raw_observation.stream(view, now=view['server_time'], minutes=minutes, cursor=cursor)
 
     @app.get('/api/diagnostics/export.json')
     def export_diagnostics(minutes: int = Query(60, ge=1, le=60)):

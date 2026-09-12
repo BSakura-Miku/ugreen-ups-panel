@@ -5,6 +5,7 @@ import { diagnosticTime, diagnosticVersion } from './diagnosticDisplay';
 import { COLLECTOR_UPDATE_DOCS, collectorAdminKeyReady, collectorOperationResult, collectorReleaseTarget, collectorReleaseUrl,
   collectorRollbackBody, collectorStageLabel, collectorUpdateBusy, collectorUpdateError, collectorUpdateRequest,
   collectorHealthChecks, collectorPreflightIssue, parseCollectorUpdateStatus, sameCollectorTarget, collectorConnectionNotice } from './collectorUpdate';
+import { readJson, startVisiblePolling } from './readPolling';
 import type { CollectorReleaseTarget, CollectorRollbackTarget, CollectorUpdateAction } from './collectorUpdate';
 
 type Intent = { action: 'install'; target: CollectorReleaseTarget; fromVersion: string }
@@ -45,34 +46,20 @@ function CollectorUpdateContent({ fallbackCurrent, diagnosticsFresh = false, cap
   }, []);
 
   useEffect(() => {
-    let stopped = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let controller: AbortController | undefined;
     let knownBusy = collectorUpdateBusy(status);
-    const poll = async () => {
+    return startVisiblePolling(async signal => {
       const epoch = mutationEpoch.current;
-      controller = new AbortController();
-      const timeout = setTimeout(() => controller?.abort(), 8000);
-      let next: CollectorUpdateStatus | null = null;
       try {
-        // GET never carries the management key and never initiates a check.
-        const response = await fetch('/api/collector-update', { signal: controller.signal, cache: 'no-store', mode: 'same-origin', redirect: 'error' });
-        if (!response.ok) throw new Error('status_unavailable');
-        next = parseCollectorUpdateStatus(await response.json());
+        const next = parseCollectorUpdateStatus(await readJson('/api/collector-update', signal));
         if (!next) throw new Error('invalid_status');
-        if (!stopped && epoch === mutationEpoch.current) {
+        if (!signal.aborted && epoch === mutationEpoch.current) {
           knownBusy = collectorUpdateBusy(next);
           setStatus(next); setReadError(''); setReceivedAt(Date.now()); setClock(Date.now()); setAwaitingStatus(false);
         }
       } catch {
-        if (!stopped && epoch === mutationEpoch.current) setReadError('暂时无法读取更新服务状态，正在重试。');
-      } finally {
-        clearTimeout(timeout);
-        if (!stopped) timer = setTimeout(poll, knownBusy ? 2000 : 10000);
+        if (!signal.aborted && epoch === mutationEpoch.current) setReadError('暂时无法读取更新服务状态，正在重试。');
       }
-    };
-    void poll();
-    return () => { stopped = true; clearTimeout(timer); controller?.abort(); };
+    }, () => knownBusy ? 2000 : 10000);
   }, [pollGeneration]);
 
   const busy = collectorUpdateBusy(status);

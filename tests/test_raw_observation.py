@@ -36,6 +36,25 @@ def accept(monitor, timestamp, **kwargs):
     return current
 
 
+def test_incremental_cursor_handles_eviction_restart_and_clock_reversal():
+    monitor = RawObservationMonitor(max_samples=2)
+    accept(monitor, 100)
+    first = monitor.stream(now=100)
+    assert first['reset'] and len(first['points']) == 1
+    accept(monitor, 99)
+    delta = monitor.stream(now=100, cursor=first['cursor'])
+    assert not delta['reset'] and [p['timestamp'] for p in delta['points']] == [99]
+    assert monitor.stream(now=100, cursor=delta['cursor'])['points'] == []
+    accept(monitor, 102)
+    accept(monitor, 104)
+    assert monitor.stream(now=104, cursor=first['cursor'])['reset']
+    assert RawObservationMonitor().stream(now=104, cursor=delta['cursor'])['reset']
+    assert monitor.stream(now=104, cursor=delta['cursor'], minutes=15)['reset']
+    full = monitor.snapshot(now=104)
+    summary = monitor.snapshot(now=104, include_points=False)
+    assert summary == dict(full, points=[])
+
+
 def test_initial_contract_and_reading_unobserved_view_do_not_start_sampling():
     monitor = RawObservationMonitor()
     empty = monitor.snapshot(now=100)

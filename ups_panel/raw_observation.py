@@ -89,6 +89,7 @@ class _Record:
     candidate: _Candidate
     point: dict
     clock: float
+    sequence: int
 
 
 class RawObservationMonitor:
@@ -117,6 +118,7 @@ class RawObservationMonitor:
         self.max_samples = max_samples
         self._lock = RLock()
         self._salt = secrets.token_bytes(32)
+        self._sequence = 0
         self._records = deque()
         self._seen = {}
         self._conflicted = set()
@@ -283,7 +285,8 @@ class RawObservationMonitor:
                 alias = 'device-' + secrets.token_hex(8)
                 self._aliases[current.device_key] = alias
             values = dict(current.data, segment=self._segment, device_alias=alias)
-            record = _Record(current, {key: values[key] for key in POINT_FIELDS}, clock)
+            self._sequence += 1
+            record = _Record(current, {key: values[key] for key in POINT_FIELDS}, clock, self._sequence)
             if len(self._records) == self.max_samples:
                 self._evict(capacity=True)
             self._records.append(record)
@@ -315,7 +318,7 @@ class RawObservationMonitor:
                           observed=True)
         return result
 
-    def snapshot(self, view=None, now=None, minutes=60):
+    def snapshot(self, view=None, now=None, minutes=60, include_points=True):
         """Return a fresh projection of the window, without mutating the observer."""
         now = _now(now)
         if not _finite(minutes) or not 1 <= minutes <= 60:
@@ -323,14 +326,33 @@ class RawObservationMonitor:
         window = min(self.window_sec, minutes * 60)
         with self._lock:
             cutoff = self._clock_at(now) - window
-            points = [dict(record.point) for record in self._records if record.clock >= cutoff]
+            records = [record for record in self._records if record.clock >= cutoff]
+            points = [dict(record.point) for record in records] if include_points else []
             return {
                 'schema': 1, 'window_sec': window, 'max_samples': self.max_samples,
-                'count': len(points), 'points': points, 'started_at': self._started_at,
-                'first_timestamp': points[0]['timestamp'] if points else None,
-                'last_timestamp': points[-1]['timestamp'] if points else None,
+                'count': len(records), 'points': points, 'started_at': self._started_at,
+                'first_timestamp': records[0].point['timestamp'] if records else None,
+                'last_timestamp': records[-1].point['timestamp'] if records else None,
                 'truncated': self._capacity_discarded_clock is not None and
                     self._capacity_discarded_clock >= cutoff,
                 'gap_count': self._gap_count, 'conflict_count': self._conflict_count,
                 'rejected_count': self._rejected_count, 'latest': self._latest(view, now),
             }
+
+    def stream(self, view=None, now=None, minutes=60, cursor=None):
+        """Sequence cursors survive wall-clock reversal; restart/eviction forces reset."""
+        now = _now(now)
+        with self._lock:
+            result = self.snapshot(view, now, minutes, include_points=False)
+            records = [r for r in self._records if r.clock >= self._clock_at(now) - result['window_sec']]
+            first = records[0].sequence if records else self._sequence + 1
+            prefix = self._salt.hex()[:16] + ':' + str(minutes) + ':'
+            sequence = None
+            if isinstance(cursor, str) and cursor.startswith(prefix):
+                suffix = cursor[len(prefix):]
+                if suffix.isascii() and suffix.isdigit() and len(suffix) <= 20:
+                    sequence = int(suffix)
+            reset = sequence is None or not first - 1 <= sequence <= self._sequence
+            result.update(cursor=prefix + str(self._sequence), reset=reset, first_sequence=first,
+                          points=[dict(r.point, sequence=r.sequence) for r in records if reset or r.sequence > sequence])
+            return result

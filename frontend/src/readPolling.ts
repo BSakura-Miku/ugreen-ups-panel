@@ -1,4 +1,17 @@
 type Visibility = Pick<Document, 'hidden' | 'addEventListener' | 'removeEventListener'>;
+
+export async function readJson<T>(url: string, signal: AbortSignal, timeoutMs = 8000): Promise<T> {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal.addEventListener('abort', abort, { once: true });
+  if (signal.aborted) controller.abort();
+  const timer = setTimeout(abort, timeoutMs);
+  try {
+    const response = await fetch(url, { signal: controller.signal, cache: 'no-store', mode: 'same-origin', redirect: 'error' });
+    if (!response.ok) throw new Error('读取暂不可用');
+    return await response.json() as T;
+  } finally { clearTimeout(timer); signal.removeEventListener('abort', abort); }
+}
 type Timer = ReturnType<typeof setTimeout>;
 type Clock = { schedule: (callback: () => void, delay: number) => Timer; cancel: (timer: Timer) => void };
 
