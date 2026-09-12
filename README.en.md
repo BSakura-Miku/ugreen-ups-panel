@@ -73,7 +73,7 @@ Successful installation starts the collector and enables it at boot.
 
 ## Update
 
-**v0.12.2 fixes a race that could briefly misclassify a newly published snapshot as stale.** Update the dashboard image; existing collectors and host updater services remain compatible. Longer capture stalls still require continued observation.
+**v0.14.0 adds comparable energy periods, effective-dated single tariffs and a unified event timeline, while reducing diagnostic traffic.** Update the dashboard image; existing collectors and host updater services remain compatible. The bounded stall observer is opt-in and does not start automatically.
 
 **v0.12.1 improves calibration, installation and update reliability.** Update the dashboard and collector for isolated calibration failures, actionable save-state messages and configuration-target checks. The new host preflight checks also require updating the host updater service itself, as described below.
 
@@ -92,7 +92,7 @@ The following is the manual alternative. Complete diagnostics need a v0.8.0 or n
   set -eu
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT
-  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.12.2 -o "$tmp_dir/source.tar.gz"
+  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.14.0 -o "$tmp_dir/source.tar.gz"
   tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir"
   sudo sh "$tmp_dir/scripts/install-collector.sh" --data-dir /volume1/docker/ugreen-ups-panel/data
   sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml pull

@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 import re
 
-VERSION = '0.12.2'
+VERSION = '0.14.0'
 
 
 @lru_cache(maxsize=1)

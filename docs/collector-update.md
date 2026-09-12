@@ -162,6 +162,6 @@ sudo sh scripts/uninstall-updater.sh
 ```
 
 这会停止并禁用更新服务，移除其 unit 与 socket；采集器继续工作。更新服务代码、管理密钥和操作记录保留，便于重装。删除 Compose 中的可选更新挂载并重建面板即可停用面板中的采集器更新操作；卡片会显示未安装或不可用。不要删除原采集快照挂载或 `data/`。
-# 连接状态说明
+## 连接状态说明
 
 面板区分入口缺失、权限不足、连接拒绝、超时与协议不兼容。入口不可见或连接失败不能证明 NAS 没有安装更新器，应先核对宿主服务、目录挂载与组权限。API 为兼容旧客户端继续提供 `installed` 和 `availability`；使用 `connection_reason` 获取具体连接原因，只有 `installation_status=confirmed` 表示已通过协议确认服务安装，`unknown` 表示无法确认。

@@ -22,6 +22,7 @@ from .cell_balance import CellBalanceMonitor
 from .raw_observation import RawObservationMonitor
 from .diagnostics import diagnostic_view, diagnostic_export, observation_csv
 from .update_api import install_update_routes
+from .analysis_api import install_analysis_routes
 from .calibration import CalibrationError, normalize_config, save_config
 from .calibration_status import calibration_status as assess_calibration
 from .storage_health import storage_error_code, storage_message, storage_status
@@ -58,6 +59,7 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
             try:
                 if state['store'] is None:
                     state['store'] = await asyncio.to_thread(Store, database)
+                    await asyncio.to_thread(state['store'].record_start, time.time())
                 await asyncio.to_thread(state['store'].ingest, view)
                 state['storage_error'] = None
                 state['storage_error_code'] = None
@@ -250,9 +252,13 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
         return state['store']
 
     @app.get('/api/history')
-    def history(hours: int = Query(24, ge=1, le=8760)):
+    def history(hours: int = Query(24, ge=1, le=8760), end: float = Query(None, ge=0, le=253402300799)):
         try:
-            return store().history(hours)
+            if end is None:
+                return store().history(hours)
+            now = time.time()
+            end = min(end, now)
+            return store().history(hours, now=end, retention_age=max(0, (now - end) / 3600))
         except (sqlite3.Error, ValueError, TypeError, KeyError) as exc:
             raise HTTPException(503, storage_message(storage_error_code(exc)))
 
@@ -359,7 +365,7 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
 
     @app.get('/api/export.csv')
     def export(hours: int = Query(24, ge=1, le=8760)):
-        rows = history(hours)['points']
+        rows = history(hours, end=None)['points']
         metrics = [*METRICS, 'cell_1', 'cell_2', 'cell_3', 'cell_4']
         extrema = [f'{metric}_{edge}' for metric in metrics for edge in ('min', 'max')]
         fields = ['timestamp', 'mode', 'count', *metrics,
@@ -390,6 +396,7 @@ def create_app(snapshot=None, database=None, static=None, calibration=None):
             raise HTTPException(503, 'Frontend build missing')
         return FileResponse(static / 'index.html')
 
+    install_analysis_routes(app, store)
     return app
 
 

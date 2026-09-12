@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { Activity, AlertTriangle, ArrowDownToLine, BatteryCharging, Cable, ChevronRight, Cpu, Database, PlugZap, ShieldCheck, SlidersHorizontal, Zap } from 'lucide-react';
 import type { BatterySession, BatterySessions, History, LiveView, Sample } from './types';
 import CalibrationSettings from './CalibrationSettings';
+import UsageAnalysis from './UsageAnalysis';
+import EventTimeline from './EventTimeline';
 import { calibrationEstimateIssue, calibrationLabel } from './calibrationState';
 import BatterySessionEnergy from './BatterySessionEnergy';
 import CellBalanceCard from './CellBalanceCard';
@@ -173,9 +175,7 @@ function App() {
   const [historyLoading, setHistoryLoading] = useState(true);
   const [apiError, setApiError] = useState(false);
   const [historyError, setHistoryError] = useState(false);
-  const [eventsError, setEventsError] = useState(false);
   const [history, setHistory] = useState<History>({ points: [], resolution_sec: 10 });
-  const [events, setEvents] = useState<Event[]>([]);
   const [hours, setHours] = useState(24);
   const [sessionDays, setSessionDays] = useState(90);
   const [metric, setMetric] = useState('ac_input_estimate_w');
@@ -217,7 +217,6 @@ function App() {
     return startVisiblePolling(async signal => {
       await Promise.all([
         fetchJson<History>(`/api/history?hours=${hours}`, signal).then(x => { if (!signal.aborted) { resolution = x.resolution_sec; setHistory(x); setHistoryError(false); } }).catch(() => { if (!signal.aborted) setHistoryError(true); }).finally(() => { if (!signal.aborted) setHistoryLoading(false); }),
-        fetchJson<Event[]>('/api/events', signal).then(x => { if (!signal.aborted) { setEvents(x); setEventsError(false); } }).catch(() => { if (!signal.aborted) setEventsError(true); })
       ]);
     }, () => historyPollInterval(hours, resolution));
   }, [hours, tab]);
@@ -282,9 +281,11 @@ function App() {
         </article>
         <CellBalanceCard sample={s} report={view?.cell_balance} fresh={!!fresh} trendHours={hours} trendMetric={metric} onTrend={showCellTrend} /></section>
         <EnergyUsageCard />
+        <UsageAnalysis />
         <BatteryCapacityCard />
         <section className="overview-records"><BatterySessionRecords days={sessionDays} onDaysChange={setSessionDays} />
-        <article className="panel events"><div className="panel-heading"><h3>最近状态事件</h3><span className="muted">最多 5 条</span></div>{eventsError ? <p className="muted">事件查询暂不可用。</p> : events.length ? events.slice(0, 5).map((e, i) => <div className="event-row" key={i}><span className={`dot ${e.detail === 'offline' ? 'amber' : 'green'}`} /><span>{e.detail === 'offline' ? '采集数据离线' : `${e.kind === 'power' ? '供电状态' : '连接恢复'} · ${modes[e.detail.split(':')[1]] || '状态更新'}`}</span><time>{new Date(e.timestamp * 1000).toLocaleString('zh-CN', { hour12: false })}</time></div>) : <p className="muted">暂无状态变化记录。</p>}</article></section>
+        </section>
+        <EventTimeline />
       </> : tab === 'calibration' ? <CalibrationSettings live={view} liveFresh={!!fresh} liveAge={age} /> : tab === 'hardware' ? <section className="hardware-page">
         <article className="hardware-intro"><div><h2>US3000 直流 UPS</h2><p>电池管理负责储能监测，电源转换负责供电。</p></div><div className="hardware-rating"><strong>120<span>W</span></strong><span>额定最大输出</span></div></article>
         <div className="spec-strip"><div><strong>43.2 Wh</strong><span>整机标称电池能量</span></div><div><strong>4S · 3 Ah</strong><span>四节串联电池组</span></div><div><strong>12 V / 10 A</strong><span>额定电池输出</span></div><div><strong>约 439 g</strong><span>拆解样机重量</span></div></div>

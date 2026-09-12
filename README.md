@@ -117,7 +117,7 @@ services:
 
 ## 更新
 
-**v0.12.2 修复读取新快照时的短暂新鲜度误判。** 更新面板镜像即可；已有采集器与更新服务继续兼容。本次针对判定竞态，长时间采集停更仍待后续持续观测。
+**v0.14.0 增加用电同期对比、按生效日期计价及事件时间轴，并减少诊断传输。** 更新面板镜像即可，已有采集器与更新服务继续兼容。偶发停更取证工具需手动启用，长期观测另行安排。
 
 **v0.12.1 加强校准、安装与升级可靠性。** 更新面板和采集器可获得校准异常隔离、明确的保存原因和配置目标核对；新的宿主升级预检还需更新宿主更新服务自身，步骤见下文。
 
@@ -136,7 +136,7 @@ services:
   set -eu
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT
-  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.12.2 -o "$tmp_dir/source.tar.gz"
+  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.14.0 -o "$tmp_dir/source.tar.gz"
   tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir"
   sudo sh "$tmp_dir/scripts/install-collector.sh" --data-dir /volume1/docker/ugreen-ups-panel/data
   sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml pull

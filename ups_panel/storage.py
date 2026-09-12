@@ -13,6 +13,7 @@ from .power import finite_number
 from .battery_sessions import BatterySessions
 from .battery_capacity import BatteryCapacity
 from .energy_usage import EnergyUsage
+from . import usage_analysis, timeline
 
 METRICS = ('battery_energy_estimate_w', 'ac_input_estimate_w', 'battery_charge_current_candidate_a', 'battery_discharge_current_candidate_a', 'battery_charge_power_candidate_w', 'battery_discharge_power_candidate_w', 'soc', 'power_w', 'dc_power_estimate_w', 'input_voltage', 'output_voltage', 'adapter_input_voltage_v', 'ups_output_voltage_v', 'current', 'battery_voltage', 'cell_delta_mv')
 CONTEXT_FIELDS = ('calibration_profile', 'calibration_revision', 'calibration_coefficients', 'ac_estimate_model', 'battery_estimate_basis',
@@ -74,6 +75,8 @@ class Store:
             self.battery_sessions = BatterySessions(db)
             self.battery_capacity = BatteryCapacity(db)
             self.energy_usage = EnergyUsage(db)
+            usage_analysis.initialize(db)
+            timeline.initialize(db)
         self.pending = {}
         self.dropped_buckets = 0
         self.last_ts = float(self.get_meta('last_ts') or 0)
@@ -199,6 +202,8 @@ class Store:
         self.battery_sessions.ingest(view)
         self.battery_capacity.ingest(view)
         self.energy_usage.ingest(view)
+        with self.connect() as db:
+            timeline.observe(db, view, now)
         state = ('online:' + sample['mode']) if view['fresh'] else 'offline'
         if state != self.last_state:
             with self.connect() as db:
@@ -308,12 +313,14 @@ class Store:
             db.execute('DELETE FROM samples WHERE resolution=? AND bucket+?<=?',
                        (DAY, DAY, now - 365 * DAY))
             db.execute('DELETE FROM events WHERE timestamp<?', (now - 180 * 86400,))
+            db.execute('DELETE FROM timeline_events WHERE observed_at<?', (now - 180 * 86400,))
+            db.execute("DELETE FROM timeline_notes WHERE event_id NOT IN (SELECT 'legacy-' || id FROM events UNION ALL SELECT 'timeline-' || id FROM timeline_events)")
             self.battery_sessions.prune(db, now)
 
-    def history(self, hours, now=None):
+    def history(self, hours, now=None, retention_age=0):
         now = time.time() if now is None else now
         requested_start = now - hours * 3600
-        resolution = 10 if hours <= 24 else 60 if hours <= 2160 else DAY
+        resolution = 10 if hours <= 24 and retention_age + hours <= 168 else 60 if hours <= 2160 and retention_age + hours <= 2160 else DAY
         stride = max(resolution, math.ceil(hours * 3600 / 1200 / resolution) * resolution)
         start_bucket = math.floor(requested_start / DAY) * DAY if resolution == DAY else requested_start
         merged = {}
@@ -351,6 +358,31 @@ class Store:
         with self.connect() as db:
             return [dict(zip(('timestamp', 'kind', 'detail'), row)) for row in db.execute(
                 'SELECT timestamp,kind,detail FROM events ORDER BY id DESC LIMIT ?', (limit,))]
+
+    @synchronized
+    def usage_analysis(self, month=None, now=None):
+        with self.connect() as db:
+            return usage_analysis.analysis(self.energy_usage, db, month, time.time() if now is None else now)
+
+    @synchronized
+    def add_tariff(self, value, now=None):
+        with self.connect() as db:
+            return usage_analysis.add_tariff(db, value, time.time() if now is None else now)
+
+    @synchronized
+    def timeline(self, limit=100):
+        with self.connect() as db:
+            return timeline.events(db, limit)
+
+    @synchronized
+    def event_note(self, event_id, note):
+        with self.connect() as db:
+            return timeline.save_note(db, event_id, note, time.time())
+
+    @synchronized
+    def record_start(self, now):
+        with self.connect() as db:
+            timeline.append(db, 'application', '面板应用启动', now, now)
 
     @synchronized
     def battery_history(self, days, limit=50, now=None, capture_fresh=True):
