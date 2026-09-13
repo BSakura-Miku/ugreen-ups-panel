@@ -51,7 +51,7 @@ test('manual admin keys go only to fixed POST headers, with explicit CSRF header
     assert.equal(request.init.mode, 'same-origin');
     assert.equal(request.init.redirect, 'error');
     assert.equal(request.init.headers['X-UPS-Update'], '1');
-    assert.equal(request.init.headers['X-UPS-Update-Key'], secret);
+    assert.equal(request.init.headers['X-UPS-Update-Key'], action === 'check' ? undefined : secret);
     assert.ok(!request.url.includes(secret) && !request.init.body.includes(secret));
   }
   assert.throws(() => collectorUpdateRequest('https://example.com', secret), /不支持/);
@@ -60,7 +60,7 @@ test('manual admin keys go only to fixed POST headers, with explicit CSRF header
 test('missing or control-character keys fail locally without echoing the supplied key', () => {
   for (const invalid of ['', '   ', 'a'.repeat(42), 'a'.repeat(44), `${key}\n`, 'secret\rvalue', 'secret\0value', 'a'.repeat(513)]) {
     assert.equal(collectorAdminKeyReady(invalid), false);
-    assert.throws(() => collectorUpdateRequest('check', invalid), error => error.message === '请输入有效的管理密钥。');
+    assert.throws(() => collectorUpdateRequest('install', invalid, target), error => error.message === '请输入有效的管理密钥。');
   }
   assert.equal(collectorAdminKeyReady(key), true);
 });
@@ -189,4 +189,14 @@ test('expired, missing and legacy diagnostics never present all update health ch
   assert.equal(legacy[1].status, 'unknown');
   assert.match(legacy[1].detail, /尚未提供/);
   assert.equal(legacy[2].status, 'ok');
+});
+
+
+test('automatic checks need no key and preserve separate cached status', () => {
+  assert.equal(collectorUpdateRequest('check', '').init.headers['X-UPS-Update-Key'], undefined);
+  const parsed = parseCollectorUpdateStatus({...status, automatic_check: {supported:true,busy:false,error:{code:'network_error',message:'private'}}});
+  assert.equal(parsed.automatic_check.error.code, 'network_error');
+  assert.equal(parsed.automatic_check.error.message, '');
+  assert.equal(parsed.latest.version, status.latest.version);
+  for (const action of ['install','rollback']) assert.throws(() => collectorUpdateRequest(action, '', target));
 });

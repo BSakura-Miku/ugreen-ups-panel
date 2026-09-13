@@ -37,14 +37,14 @@ export function collectorAdminKeyReady(value: string): boolean {
 // header, never a URL/body, storage entry, download or diagnostic message.
 export function collectorUpdateRequest(action: CollectorUpdateAction, key: string, body: Record<string, unknown> = {}) {
   if (!['check', 'install', 'rollback'].includes(action)) throw new Error('不支持的采集器操作。');
-  if (!collectorAdminKeyReady(key)) throw new Error('请输入有效的管理密钥。');
+  if (action !== 'check' && !collectorAdminKeyReady(key)) throw new Error('请输入有效的管理密钥。');
   const payload = action === 'check' ? {} : action === 'install' ? collectorReleaseTarget(body) : collectorRollbackBody(body);
   if (!payload) throw new Error('更新目标已失效，请重新检查。');
   return {
     url: `/api/collector-update/${action}`,
     init: {
       method: 'POST', credentials: 'same-origin', mode: 'same-origin', redirect: 'error', cache: 'no-store',
-      headers: { 'Content-Type': 'application/json', 'X-UPS-Update': '1', 'X-UPS-Update-Key': key.trim() },
+      headers: { 'Content-Type': 'application/json', 'X-UPS-Update': '1', ...(action === 'check' ? {} : { 'X-UPS-Update-Key': key.trim() }) },
       body: JSON.stringify(payload),
     } satisfies RequestInit,
   };
@@ -179,6 +179,12 @@ export function parseCollectorUpdateStatus(value: unknown): CollectorUpdateStatu
       error: isObject(item.error) && typeof item.error.code === 'string' ? { code: item.error.code.slice(0, 80), message: '' } : null };
   }
   const extended: Partial<CollectorUpdateStatus> = {};
+  if (isObject(value.automatic_check) && value.automatic_check.supported === true) {
+    const check = value.automatic_check;
+    extended.automatic_check = { supported: true, busy: check.busy === true, due: check.due === true,
+      error: isObject(check.error) && typeof check.error.code === 'string'
+        ? { code: check.error.code.slice(0, 80), message: '' } : null };
+  }
   if (typeof value.connection_reason === 'string' && ['connected', 'endpoint_missing', 'connection_failed',
     'permission_denied', 'connection_refused', 'timeout', 'protocol_incompatible'].includes(value.connection_reason)) {
     extended.connection_reason = value.connection_reason;

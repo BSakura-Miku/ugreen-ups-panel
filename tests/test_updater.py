@@ -141,7 +141,7 @@ def test_gets_are_read_only_and_never_check_network_or_write_state(rig):
     assert KEY not in json.dumps(status)
 
 
-@pytest.mark.parametrize('key', [None, '', 'B' * 43, {'key': KEY}, KEY + '\n'])
+@pytest.mark.parametrize('key', ['', 'B' * 43, {'key': KEY}, KEY + '\n'])
 def test_invalid_auth_never_starts_network_or_host_work(rig, key):
     with pytest.raises(UpdateError, match='管理密钥'):
         mutation(rig.manager, 'check', key=key)
@@ -539,3 +539,59 @@ def test_post_update_configuration_fault_does_not_trigger_blind_rollback_or_clai
     assert status['operation']['error']['code'] == 'calibration_mismatch'
     assert status['operation']['outcome'] == 'manual_required'
     assert rig.helper_state.calls == ['install']
+
+
+def public_check(rig):
+    return rig.manager.request({'schema': 1, 'action': 'check', 'payload': {}, 'key': None})
+
+
+def test_automatic_check_caches_without_overwriting_install_history(rig):
+    checked(rig)
+    previous = dict(rig.manager.operation)
+    rig.manager.checked_at -= 3601
+    public_check(rig)
+    rig.manager.check_worker.join(timeout=2)
+    for _ in range(10):
+        status = public_check(rig)
+    assert rig.client.checks == 2
+    assert status['latest']['version'] == rig.release.version
+    assert status['automatic_check'] == {'supported': True, 'busy': False, 'due': False, 'error': None}
+    assert rig.manager.operation == previous
+    assert rig.client.downloads == 0 and not rig.helper_state.calls
+
+
+def test_public_check_deduplicates_concurrent_requests_and_retains_cache_on_error(rig):
+    checked(rig)
+    previous = rig.manager.latest
+    rig.manager.checked_at -= 3601
+    entered, finish = threading.Event(), threading.Event()
+    def fail():
+        entered.set()
+        assert finish.wait(2)
+        raise updater.ReleaseError('network_error')
+    rig.client.latest = fail
+    try:
+        public_check(rig)
+        assert entered.wait(1)
+        worker = rig.manager.check_worker
+        for _ in range(10):
+            assert public_check(rig)['automatic_check']['busy']
+            assert rig.manager.check_worker is worker
+    finally:
+        finish.set()
+    worker.join(timeout=2)
+    status = public_check(rig)
+    assert not status['automatic_check']['busy']
+    assert status['automatic_check']['error']['code'] == 'network_error'
+    assert rig.manager.latest is previous and rig.manager.check_worker is worker
+    rig.manager.next_check = 0
+    public_check(rig)
+    rig.manager.check_worker.join(timeout=2)
+    assert rig.manager.check_worker is not worker
+
+
+def test_public_check_cannot_install_or_accept_payload(rig):
+    for action, payload in [('install', {}), ('rollback', {}), ('check', {'url': 'https://evil.invalid'})]:
+        with pytest.raises(UpdateError):
+            rig.manager.request({'schema': 1, 'action': action, 'payload': payload, 'key': None})
+    assert rig.client.checks == 0 and not rig.helper_state.calls

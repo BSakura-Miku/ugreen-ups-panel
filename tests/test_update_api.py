@@ -41,11 +41,10 @@ def test_read_only_status_never_sends_key_and_handles_uninstalled_service(client
     assert client.host_updater.calls == [()]
 
 
-@pytest.mark.parametrize('headers', [{}, {'X-UPS-Update': '1'}, {'X-UPS-Update-Key': KEY},
+@pytest.mark.parametrize('headers', [{}, {'X-UPS-Update-Key': KEY},
     dict(HEADERS, Origin='https://evil.invalid'), dict(HEADERS, **{'Sec-Fetch-Site': 'cross-site'}),
     dict(HEADERS, **{'Sec-Fetch-Site': 'same-site'}), dict(HEADERS, Origin='http://testserver@evil.invalid'),
-    dict(HEADERS, Origin='null'), dict(HEADERS, Origin='http://testserver/path'),
-    dict(HEADERS, **{'X-UPS-Update-Key': 'bad-key'})])
+    dict(HEADERS, Origin='null'), dict(HEADERS, Origin='http://testserver/path')])
 def test_missing_auth_or_foreign_browser_requests_never_reach_host(client, headers):
     response = client.post('/api/collector-update/check', json={}, headers=headers)
     assert response.status_code in (401, 403)
@@ -80,7 +79,7 @@ def test_non_json_numbers_cannot_crash_the_real_ipc_encoder(client, number):
 def test_proxy_tls_and_same_host_are_supported_without_persisting_key(client, origin):
     response = client.post('/api/collector-update/check', json={}, headers=dict(HEADERS, Origin=origin))
     assert response.status_code == 202
-    assert client.host_updater.calls == [('check', {}, KEY)]
+    assert client.host_updater.calls == [('check', {}, None)]
     assert KEY not in response.text
 
 
@@ -131,7 +130,7 @@ def test_panel_wiring_failure_keeps_release_check_available(client):
     client.host_updater.calibration = {'readiness': {'target': 'mismatched'}}
     response = client.post('/api/collector-update/check', json={}, headers=HEADERS)
     assert response.status_code == 202
-    assert client.host_updater.calls == [('check', {}, KEY)]
+    assert client.host_updater.calls == [('check', {}, None)]
 
 
 @pytest.mark.parametrize('code,expected', [('path_unconfigured', 'calibration_unconfigured'),
@@ -142,4 +141,17 @@ def test_secondary_readiness_failure_is_not_hidden_by_unknown_profile(client, co
     response = client.post('/api/collector-update/install', json={
         'version': '0.12.1', 'release_id': 1, 'sha256': 'b' * 64}, headers=HEADERS)
     assert response.status_code == 409 and response.json()['detail']['code'] == expected
+    assert not client.host_updater.calls
+
+
+def test_public_check_requires_no_key_and_does_not_forward_one(client):
+    response = client.post('/api/collector-update/check', json={}, headers={'X-UPS-Update': '1'})
+    assert response.status_code == 202
+    assert client.host_updater.calls == [('check', {}, None)]
+
+
+@pytest.mark.parametrize('action', ['install', 'rollback'])
+def test_install_and_rollback_still_require_key(client, action):
+    response = client.post('/api/collector-update/' + action, json={}, headers={'X-UPS-Update': '1'})
+    assert response.status_code == 401
     assert not client.host_updater.calls

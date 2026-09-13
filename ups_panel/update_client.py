@@ -114,6 +114,11 @@ def public_status(value):
     result = unavailable('ready')
     result.update(installed=True, installation_status='confirmed', updater_version=value['updater_version'],
                   current=build_value(value.get('current')), checked_at=timestamp(value.get('checked_at')))
+    check = value.get('automatic_check')
+    if isinstance(check, dict) and check.get('supported') is True:
+        error = check.get('error')
+        result['automatic_check'] = {'supported': True, 'busy': check.get('busy') is True, 'due': check.get('due') is True,
+            'error': UpdateError(error.get('code')).public() if isinstance(error, dict) else None}
     result['runtime'] = build_value(value.get('runtime'))
     source_status = value.get('source_status')
     result['source_status'] = source_status if source_status in ('verified', 'unverified', 'modified', 'unreadable') else 'unknown'

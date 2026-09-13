@@ -73,7 +73,7 @@ def install_update_routes(app, read_snapshot, client=None, *, calibration_status
             if not valid:
                 reject('invalid_request', 403)
         key = request.headers.get('x-ups-update-key', '')
-        if not KEY_PATTERN.fullmatch(key):
+        if action != 'check' and not KEY_PATTERN.fullmatch(key):
             reject('unauthorized', 401)
         body = bytearray()
         async for part in request.stream():
@@ -93,7 +93,7 @@ def install_update_routes(app, read_snapshot, client=None, *, calibration_status
             if code:
                 reject(code, 409)
         try:
-            return await asyncio.to_thread(client.request, action, payload, key)
+            return await asyncio.to_thread(client.request, action, payload, key if action != 'check' else None)
         except UpdateError as exc:
             code = exc.code
             status = (401 if code == 'unauthorized' else 429 if code == 'rate_limited'

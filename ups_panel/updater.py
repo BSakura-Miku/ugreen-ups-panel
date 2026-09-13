@@ -209,6 +209,10 @@ class UpdateManager:
         self.helper = helper or run_helper
         self.lock = threading.RLock()
         self.worker = None
+        self.check_worker = None
+        self.checking = False
+        self.check_error = None
+        self.next_check = 0.0
         self.stopping = False
         self.requests = deque(maxlen=10)
         self.failed_auth = deque(maxlen=10)
@@ -233,7 +237,7 @@ class UpdateManager:
         try:
             saved = read_json(self.paths.state / 'state.json', uid=self.paths.trusted_uid)
             # Latest release objects are deliberately not trusted after service restart.
-            # A new authenticated check is required before any further installation.
+            # A new release check is required before any further installation.
             status = unavailable('ready')
             status.update(installed=True, updater_version=VERSION, operation=saved.get('operation'))
             self.operation = public_status(status)['operation']
@@ -319,6 +323,8 @@ class UpdateManager:
                           source_status=source_status, source_error=UpdateError(source_code).public() if source_code else None,
                           runtime=runtime, preflight=preflight,
                           checked_at=self.checked_at, rollback=rollback_status(self.paths),
+                          automatic_check={'supported': True, 'busy': self.checking, 'due': self._check_due(),
+                                           'error': self.check_error},
                           operation=dict(self.operation) if self.operation else None)
             if self.latest is not None:
                 latest = self.latest
@@ -326,6 +332,38 @@ class UpdateManager:
                     ('version', 'tag', 'release_id', 'sha256', 'size', 'published_at', 'notes')}
                 result['latest']['url'] = latest.release_url
             return public_status(result)
+
+    def _check_due(self):
+        return (not self.stopping and not self.checking
+                and not (self.operation and self.operation['busy'])
+                and time.monotonic() >= self.next_check
+                and (self.checked_at is None or time.time() - self.checked_at >= 3600))
+
+    def check_cached(self):
+        """Public bounded metadata lookup; never changes installation history."""
+        with self.lock:
+            if self._check_due():
+                self.checking = True
+                self.check_worker = threading.Thread(target=self._check_cached, daemon=False)
+                self.check_worker.start()
+            return self.status()
+
+    def _check_cached(self):
+        try:
+            latest = self.client.latest()
+            with self.lock:
+                self.latest = latest
+                self.checked_at = time.time()
+                self.check_error = None
+                self.next_check = time.monotonic() + 3600
+        except Exception as exc:
+            # Keep a known release on failure; never expose exception details.
+            with self.lock:
+                self.check_error = UpdateError(exc.code if isinstance(exc, ReleaseError) else 'network_error').public()
+                self.next_check = time.monotonic() + 300
+        finally:
+            with self.lock:
+                self.checking = False
 
     def _authenticate(self, key):
         valid = isinstance(key, str) and KEY_PATTERN.fullmatch(key) and hmac.compare_digest(key, self._key)
@@ -349,9 +387,13 @@ class UpdateManager:
             return self.status()
         if action not in ('check', 'install', 'rollback') or set(request) != {'schema', 'action', 'key', 'payload'}:
             raise UpdateError('invalid_request')
+        if action == 'check' and request.get('key') is None:
+            if request['payload'] != {}:
+                raise UpdateError('invalid_request')
+            return self.check_cached()
         with self.lock:
             self._authenticate(request.get('key'))
-            if self.stopping or (self.operation and self.operation['busy']):
+            if self.stopping or self.checking or (self.operation and self.operation['busy']):
                 raise UpdateError('busy')
             payload = request['payload']
             required = {'check': set(), 'install': {'version', 'release_id', 'sha256'},
@@ -491,6 +533,8 @@ class UpdateManager:
             worker = self.worker
         if worker:
             worker.join()
+        if self.check_worker:
+            self.check_worker.join()
 
 
 class UpdateHandler(socketserver.StreamRequestHandler):
