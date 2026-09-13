@@ -36,6 +36,7 @@ export default function CellBalanceCard({ sample, report, fresh, trendHours, tre
       <th scope="row">0{index + 1}</th><td><div className="cell-track"><i style={{ width: finite(current?.cells?.[index]) ? `${Math.max(0, Math.min(100, (current.cells[index] - 2.5) / 1.8 * 100))}%` : '0%' }}/></div></td><td><strong>{rawNumber(current?.cells?.[index], 3)} <small>V</small></strong></td><td>{currentLowest?.includes(index + 1) ? <span className="cell-lowest-tag">最低</span> : '—'}</td>
     </tr>)}</tbody></table>
     <p className="cell-current-note">电压条为 2.5–4.3 V 参考；{currentLowest?.length ? `当前最低：${currentLowest.map(cellNumberLabel).join('、')}${currentLowest.length > 1 ? '（并列）' : ''}。` : ''}单次低读数不代表异常。</p>
+    <details className="cell-more"><summary>待机窗口与参考说明</summary>
     <div className="cell-recent-window">
       <h4>{fresh ? '最近待机窗口' : '上次收到的待机统计'} <span>最近 30 分钟内</span></h4>
       {recent ? <><div className="cell-recent-values"><div><span>最常偏低</span><strong>{cellNumberLabel(supported.frequent_lowest_cell)}</strong></div><div><span>窗口压差峰值</span><strong>{rawNumber(supported.recent_max_delta_mv, 0)} <small>mV</small></strong></div></div><p>{supported.recent_sample_count} 条本次连续待机样本{finite(supported.sample_timestamp) ? ` · 截至 ${new Date(supported.sample_timestamp * 1000).toLocaleTimeString('zh-CN', { hour12: false })}` : ''}</p></> : <p>连续待机后积累窗口数据，充放电读数不计入此统计。</p>}
@@ -45,6 +46,7 @@ export default function CellBalanceCard({ sample, report, fresh, trendHours, tre
       <dl><div><dt>小于 20 mV</dt><dd>一致性较好</dd></div><div><dt>20 至小于 50 mV</dt><dd>轻微差异</dd></div><div><dt>50 至小于 100 mV</dt><dd>压差偏大</dd></div><div><dt>100 mV 及以上</dt><dd>建议检查</dd></div></dl>
       <p>这些参考阈值未获厂家验证。仅在外部供电且电池未充电、连续待机满 30 分钟后使用；当前参考区间还需持续 2 分钟才确认。</p>
       <p>最常偏低按最近窗口中单独最低的出现次数统计；同次并列不计入次数，次数相同时不指定单一电芯。窗口峰值来自实际压差读数。</p>
+    </details>
     </details>
     <div className="cell-note"><CircleHelp size={14} /><span>压差不等于电池容量或健康度（SOH），不能据此计算健康百分比。</span></div>
   </article>;

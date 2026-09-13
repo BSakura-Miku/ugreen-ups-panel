@@ -132,6 +132,8 @@ footer{margin:20px 0;font-size:12px}
 .overview-records{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(350px,1fr);gap:14px;margin-top:14px;align-items:start}
 .overview-records:has(.has-records){grid-template-columns:1fr}
 .overview-records>.battery-sessions,.overview-records>.events{margin:0}
+.overview-records + .event-timeline{margin-top:14px}
+@media(max-width:760px){.overview-records + .event-timeline{margin-top:12px}}
 .battery-sessions .panel-heading{gap:8px}
 .session-range{margin-top:10px;width:fit-content;gap:2px;flex-wrap:wrap}
 .session-summary{gap:14px;margin-top:12px}
@@ -432,3 +434,28 @@ footer{font-size:12px;margin:16px 0;gap:9px}
 .cell-alert.check button{color:#ffede5;border-color:#e99b86;background:#ffe4dc12}
 #cell-balance-heading{scroll-margin-top:22px}
 @media(max-width:760px){.cell-alert{gap:8px;align-items:center;padding:10px 11px}.cell-alert>div{display:block}.cell-alert strong{font-size:15px}.cell-alert span{display:block;font-size:12px;margin-top:3px}.cell-alert>svg{width:20px}.cell-alert button{font-size:12px;padding:8px}.cell-alert button svg{display:none}#cell-balance-heading{scroll-margin-top:128px}}
+
+/* Overview: prioritize active readings and share energy analysis controls. */
+.overview-summary .primary-readings{grid-template-columns:1fr 1.5fr 1fr;padding:20px 0 16px}
+.primary-readings .metric-value{font-size:36px}
+.telemetry-details>summary,.cell-more>summary{cursor:pointer;padding:12px 0;font-size:13px;color:#c3d3ba;min-height:44px}
+.telemetry-details[open]{padding-bottom:6px}
+.detail-grid{grid-template-columns:minmax(0,2fr) minmax(340px,1fr);align-items:stretch}
+.detail-grid>.trend{display:flex;flex-direction:column;min-width:0}
+.detail-grid>.trend .chart{flex:1;min-height:270px}
+.detail-grid>.trend .history-coverage{margin-top:auto}
+.cell-more .cell-recent-window{margin-top:0}
+.energy-view-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:16px 0}
+.energy-view-toolbar .energy-month-navigation{margin:0;gap:16px}
+.energy-view-toolbar .range{flex-wrap:wrap}
+.energy-usage .usage-analysis{padding:0;margin:0}
+.energy-view-toolbar button{min-height:40px}
+@media(max-width:1100px){.detail-grid{grid-template-columns:minmax(0,1.4fr) minmax(320px,1fr)}}
+@media(max-width:1050px){.detail-grid{grid-template-columns:1fr}}
+@media(max-width:760px){
+.overview-summary .primary-readings{grid-template-columns:1fr 1fr;gap:16px 0}
+.primary-readings .metric-value{font-size:30px}
+.overview-summary .primary-readings>.metric:last-child{grid-column:1/-1;border-top:1px solid #354432;padding:12px 0 0}
+.energy-view-toolbar{align-items:stretch;gap:12px}.energy-view-toolbar .energy-month-navigation{width:100%}
+.energy-view-toolbar .range{width:100%;display:flex}.energy-view-toolbar .range button{flex:1;min-height:44px}
+}

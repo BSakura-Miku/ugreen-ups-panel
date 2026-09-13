@@ -9,6 +9,7 @@ import {
 } from './energyUsageDisplay';
 import type { EnergyHour, EnergyUsageDay, EnergyUsageMonth } from './energyUsageDisplay';
 import './energy-usage.css';
+import UsageAnalysis from './UsageAnalysis';
 
 type ReadState<T> = { key: string | null; state: 'loading' | 'ready' | 'error'; data: T | null };
 const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
@@ -79,6 +80,7 @@ function DayDetail({ date, data, state, currentDate }: { date: string | null; da
 }
 
 export default function EnergyUsageCard() {
+  const [analysisView, setAnalysisView] = useState<'calendar' | 'comparison' | 'cost'>('calendar');
   const [requestedMonth, setRequestedMonth] = useState<string | null>(null);
   const [monthRead, setMonthRead] = useState<ReadState<EnergyUsageMonth>>({ key: null, state: 'loading', data: null });
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -123,7 +125,7 @@ export default function EnergyUsageCard() {
   useEffect(() => {
     const generation = ++dayGeneration.current;
     setDayRead({ key: dayDate, state: 'loading', data: null });
-    if (!dayDate) return;
+    if (!dayDate || analysisView !== 'calendar') return;
     const stop = startVisiblePolling(async signal => {
       try {
         const data = await readEnergyUsageDay(dayDate, signal);
@@ -133,7 +135,7 @@ export default function EnergyUsageCard() {
       }
     }, () => 10000);
     return () => { dayGeneration.current++; stop(); };
-  }, [dayDate]);
+  }, [dayDate, analysisView]);
 
   const dayState = dayRead.key === dayDate ? dayRead.state : 'loading';
   const selectedDay = dayState === 'ready' && dayRead.key === dayDate ? dayRead.data : null;
@@ -158,7 +160,7 @@ export default function EnergyUsageCard() {
   }
 
   return <article className="panel energy-usage" aria-labelledby="energy-usage-heading">
-    <div className="panel-heading energy-heading"><div><h3 id="energy-usage-heading"><PlugZap size={18}/>用电统计 · 估算</h3><p>市电输入已记录累计 · 1 kWh = 1 度电</p></div>
+    <div className="panel-heading energy-heading"><div><h3 id="energy-usage-heading"><PlugZap size={18}/>用电分析 · 估算</h3><p>市电输入已记录累计 · 1 kWh = 1 度电</p></div>
       {report && <span className="energy-zone-label">{report.timezone === 'Asia/Shanghai' ? '北京时间' : report.timezone}</span>}</div>
     {monthState === 'error' && <p className="energy-read-error" role="status">用电记录暂时无法读取，正在重试。</p>}
     {notice && <p className="energy-recording-note" role="status">{notice}{report && ['not_configured', 'charge_not_configured'].includes(report.reason ?? '') && <a className="energy-calibration-link" href="#calibration">前往功率校准</a>}</p>}
@@ -167,13 +169,16 @@ export default function EnergyUsageCard() {
       <div><dt>所选月累计</dt><dd>{monthLoading ? <LoadingNumber/> : energyKwh(report?.summary.estimate_kwh)}<small>kWh</small></dd><p>{report ? `已记录 ${report.summary.recorded_days} 天` : '已记录累计'}{(report?.summary.basis_count ?? 0) > 1 && <span className="energy-segment-badge">分段估算</span>}</p></div>
       <div><dt>完整记录日均</dt><dd>{monthLoading ? <LoadingNumber/> : energyKwh(report?.summary.complete_day_average_kwh)}<small>kWh</small></dd><p>{report?.summary.complete_days ? `${report.summary.complete_days} 个已结束完整日` : '暂无完整日'}</p></div>
     </dl>
-    <div className="energy-main-grid">
-      <section className="energy-calendar-section" aria-labelledby="energy-month-heading" aria-busy={monthLoading}>
+    <div className="energy-view-toolbar">
         <div className="energy-month-navigation"><h4 id="energy-month-heading">{energyMonthLabel(month)}</h4><div className="energy-month-buttons">
           {month !== currentMonth && <button className="energy-current-month" type="button" onClick={() => changeMonth(null)}>本月</button>}
           <button type="button" aria-label="查看上个月用电记录" disabled={!canPrevious} onClick={() => previousMonth && changeMonth(previousMonth)}><ChevronLeft size={17}/></button>
           <button type="button" aria-label="查看下个月用电记录" disabled={!canNext} onClick={() => nextMonth && changeMonth(nextMonth)}><ChevronRight size={17}/></button>
         </div></div>
+      <div className="range" role="group" aria-label="用电分析视图">{([{key: 'calendar', label: '用电日历'}, {key: 'comparison', label: '同期对比'}, {key: 'cost', label: '费用估算'}] as const).map(item => <button key={item.key} type="button" aria-pressed={analysisView === item.key} className={analysisView === item.key ? 'active' : ''} onClick={() => setAnalysisView(item.key)}>{item.label}</button>)}</div>
+    </div>
+    {analysisView === 'calendar' ? <div className="energy-main-grid">
+      <section className="energy-calendar-section" aria-labelledby="energy-month-heading" aria-busy={monthLoading}>
         <table className="energy-calendar" role="grid" aria-label={`${energyMonthLabel(month)}用电日历，单位 kWh`} aria-describedby="energy-calendar-help">
           <thead><tr>{WEEKDAYS.map(day => <th key={day} scope="col" abbr={`星期${day}`}>{day}</th>)}</tr></thead>
           <tbody>{Array.from({ length: cells.length / 7 }, (_, row) => <tr key={row}>{cells.slice(row * 7, row * 7 + 7).map((date, column) => {
@@ -194,7 +199,7 @@ export default function EnergyUsageCard() {
         <div className="energy-calendar-legend" id="energy-calendar-help"><span><i className="energy-partial-dot"/>部分记录</span><span className="energy-heat-legend">记录电量 少{[1, 2, 3, 4, 5].map(level => <i className={`energy-heat-${level}`} key={level}/>)}多</span></div>
       </section>
       <DayDetail date={dayDate} data={selectedDay} state={dayState} currentDate={currentDate}/>
-    </div>
+    </div> : <UsageAnalysis key={month} month={month} view={analysisView}/> }
     <div className="energy-recorded-at"><span>{report?.last_recorded_at ? `记录截至 ${energyTimestamp(report.last_recorded_at, report.timezone)}` : report ? '尚无已记录区间' : '等待统计记录'}{report && !report.capture_fresh ? ' · 采集离线' : ''}</span>
       {report?.tracking_started_at && <span>开始记录于 {energyTimestamp(report.tracking_started_at, report.timezone)}</span>}</div>
     <details className="energy-method"><summary>统计口径 <ChevronDown size={14}/></summary>

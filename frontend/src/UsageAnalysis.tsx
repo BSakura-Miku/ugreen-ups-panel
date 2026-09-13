@@ -28,8 +28,7 @@ export async function saveSetting(url: string, body: unknown, method = 'POST') {
   } finally { clearTimeout(timer); }
 }
 
-export default function UsageAnalysis() {
-  const [month, setMonth] = useState('');
+export default function UsageAnalysis({ month, view }: { month: string; view: 'comparison' | 'cost' }) {
   const [data, setData] = useState<Analysis | null>(null);
   const [error, setError] = useState('');
   const [generation, refresh] = useState(0);
@@ -56,19 +55,19 @@ export default function UsageAnalysis() {
     finally { setSaving(false); }
   }
   const names: Record<string, string> = { day: '今日与昨日同期', week: '本周与上周同期', month: '所选月与前月同期' };
-  return <section className="panel usage-analysis" aria-labelledby="usage-analysis-heading">
-    <div className="panel-heading"><h3 id="usage-analysis-heading">用电对比与费用</h3><label>月份 <input aria-label="用电分析月份" type="month" min="1970-01" max="9998-12" value={month || data?.month || ''} onInput={e => { setData(null); setMonth(e.currentTarget.value); }} onChange={e => { setData(null); setMonth(e.target.value); }}/></label></div>
-    <p className="muted">按北京时间比较相同长度的完整小时。覆盖率不足 99% 或校准依据不同，暂不计算增减比例。</p>
+  return <section className="usage-analysis" aria-labelledby="usage-analysis-heading">
+    <h4 id="usage-analysis-heading" className="visually-hidden">{view === 'comparison' ? '同期对比' : '用电费用'}</h4>
+    {view === 'comparison' && <p className="muted">按北京时间比较相同长度的完整小时。覆盖率不足 99% 或校准依据不同，暂不计算增减比例。</p>}
     {error && <p role="status">{error} 以下如有记录为上次查询结果。</p>}
     {!data ? <p className="muted">正在读取用电分析…</p> : <>
-      <div className="usage-comparisons">{data.comparisons.map(item => <article key={item.key}>
+      {view === 'comparison' && <div className="usage-comparisons">{data.comparisons.map(item => <article key={item.key}>
         <h4>{names[item.key]}</h4><strong>{numeric(item.current.estimate_kwh)} <small>kWh</small></strong><p>对照 {numeric(item.previous.estimate_kwh)} kWh</p>
         <p>{item.reason ? item.reason === 'basis_changed' ? '校准依据不同，暂不比较' : '有效记录不足，暂不比较'
           : <>变化 {item.delta_kwh !== null && item.delta_kwh > 0 ? '+' : ''}{numeric(item.delta_kwh)} kWh · {item.change_percent === null ? '对照为零，无百分比' : `${item.change_percent > 0 ? '+' : ''}${numeric(item.change_percent, 1)}%`}</>}</p>
         <small>覆盖 {coverage(item.current.coverage_ratio)} / {coverage(item.previous.coverage_ratio)}</small>
         <details><summary>比较范围与依据</summary><p>{stamp(item.current.start)} 至 {stamp(item.current.end)}</p><p>对照 {stamp(item.previous.start)} 至 {stamp(item.previous.end)}</p><p>估算依据数量 {item.current.basis_count} / {item.previous.basis_count}；月份天数不同时只比较共同长度。</p></details>
-      </article>)}</div>
-      <div className="usage-cost"><h4>{data.month} · 已记录用电费用估算</h4>
+      </article>)}</div>}
+      {view === 'cost' && <><div className="usage-cost"><h4>{data.month} · 已记录用电费用估算</h4>
         {Object.keys(data.cost_totals).length ? Object.entries(data.cost_totals).map(([unit, amount]) => <strong key={unit}>{unit} {numeric(amount, 2)} </strong>) : <p>尚无可计价的用电记录。</p>}
         <p className="muted">记录覆盖 {coverage(data.coverage_ratio)}；未配置对应电价的记录 {numeric(data.unpriced_kwh)} kWh。费用只对应已记录电量，缺采时段不补算。</p>
         <details><summary>每日费用</summary><div className="usage-table"><table><thead><tr><th>日期</th><th>费用估算</th><th>电价 / kWh</th><th>覆盖</th></tr></thead><tbody>{data.costs.map(day => <tr key={day.date}><td>{day.date}</td><td>{day.currency || ''} {numeric(day.estimate_cost, 2)}</td><td>{numeric(day.rate, 4)}</td><td>{coverage(day.coverage_ratio)}</td></tr>)}</tbody></table></div></details>
@@ -77,7 +76,7 @@ export default function UsageAnalysis() {
         <form onSubmit={save}><label>生效日期<input type="date" required value={effective} onInput={e => setEffective(e.currentTarget.value)} onChange={e => setEffective(e.target.value)}/></label><label>每 kWh 电价<input type="number" min="0" max="10000" step="0.000001" required value={rate} onChange={e => setRate(e.target.value)}/></label><label>币种<input aria-label="币种代码" pattern="[A-Z]{3}" maxLength={3} required value={currency} onChange={e => setCurrency(e.target.value.toUpperCase())}/></label><button disabled={saving || !!error}>{saving ? '正在保存…' : '保存电价'}</button></form>
         {message && <p role="status">{message}</p>}
         <ul>{data.tariffs.map(price => <li key={price.effective_date}>{price.effective_date} 起 · {price.currency} {price.rate} / kWh</li>)}</ul>
-      </details>
+      </details></>}
     </>}
   </section>;
 }

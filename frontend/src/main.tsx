@@ -3,7 +3,6 @@ import { createRoot } from 'react-dom/client';
 import { Activity, AlertTriangle, ArrowDownToLine, BatteryCharging, Cable, ChevronRight, Cpu, Database, PlugZap, ShieldCheck, SlidersHorizontal, Zap } from 'lucide-react';
 import type { BatterySession, BatterySessions, History, LiveView, Sample } from './types';
 import CalibrationSettings from './CalibrationSettings';
-import UsageAnalysis from './UsageAnalysis';
 import EventTimeline from './EventTimeline';
 import { calibrationEstimateIssue, calibrationLabel } from './calibrationState';
 import BatterySessionEnergy from './BatterySessionEnergy';
@@ -258,11 +257,11 @@ function App() {
           <div className="supply-status-row"><div className="supply-state"><PlugZap size={19}/><h2>{fresh && s ? modes[s.mode] || modes.unknown : '等待有效数据'}</h2><span className="supply-age">{fresh ? `${Math.floor(age!)} 秒前更新` : '实时数值已隐藏'}</span></div><div className={`compact-power-path ${isBattery ? 'battery-path' : !supplyKnown ? 'inactive-path' : ''}`} aria-label={supplyKnown ? isBattery ? '电池经 US3000 向 NAS 供电' : '外部电源经 US3000 向 NAS 供电' : '供电路径等待有效数据'}><span><Cable size={14}/>适配器</span><ChevronRight size={14}/><span><BatteryCharging size={15}/>US3000</span><ChevronRight size={14}/><span><Database size={14}/>NAS</span></div></div>
           <div className="primary-readings">
             <div className="soc-reading"><div className="metric-label"><BatteryCharging size={16}/>电池电量</div><div className="metric-value">{num(currentSample?.soc, 0)}<span>%</span></div><div className="soc-track"><i style={{ width: currentSample && Number.isFinite(currentSample.soc) ? `${Math.max(0, Math.min(100, currentSample.soc))}%` : '0%' }}/></div><span className="muted">设备报告值</span></div>
-            <Metric icon={<Zap size={16}/>} label="交流输入功率 · 估算" value={num(estimateIssue ? null : currentSample?.ac_input_estimate_w)} unit="W" note={estimateIssue ? '校准信息异常 · 功率估算暂停' : powerNote(currentSample, 'ac')}/>
-            <Metric icon={<BatteryCharging size={16}/>} label="电池放电功率 · 估算" value={num(estimateIssue ? null : currentSample?.battery_energy_estimate_w)} unit="W" note={estimateIssue ? '校准信息异常 · 功率估算暂停' : powerNote(currentSample, 'battery')}/>
+            <Metric icon={<Zap size={16}/>} label={isBattery ? '电池放电功率 · 估算' : '交流输入功率 · 估算'} value={num(estimateIssue ? null : isBattery ? currentSample?.battery_energy_estimate_w : currentSample?.ac_input_estimate_w)} unit="W" note={estimateIssue ? '校准信息异常 · 功率估算暂停' : powerNote(currentSample, isBattery ? 'battery' : 'ac')}/>
             <Metric icon={<BatteryCharging size={16}/>} label="电池组电压" value={num(currentSample?.battery_voltage, 3)} unit="V" note="额定电池能量 43.2 Wh"/>
           </div>
-          <div className="power-caption"><span>两项功率均非 NAS 输出功率。<a href="#diagnostics">估算依据 ↗</a></span><a className="power-calibration-link" href="#calibration"><SlidersHorizontal size={14}/><span>{fresh ? '当前配置' : '最近配置'}：{calibrationLabel(s?.calibration_profile ?? view?.calibration_validation?.profile)} · 调整系数</span><ChevronRight size={14}/></a></div>
+          <div className="power-caption"><span>功率估算非 NAS 输出功率。<a href="#diagnostics">估算依据 ↗</a></span><a className="power-calibration-link" href="#calibration"><SlidersHorizontal size={14}/><span>{fresh ? '当前配置' : '最近配置'}：{calibrationLabel(s?.calibration_profile ?? view?.calibration_validation?.profile)} · 调整系数</span><ChevronRight size={14}/></a></div>
+          <details className="telemetry-details"><summary>详细电压与充放电读数</summary>
           <dl className="telemetry-readings">
             <div><dt>适配器输入 · 直流侧</dt><dd>{num(currentSample?.input_voltage, 3)} <small>V</small></dd></div>
             <div><dt>UPS 输出电压</dt><dd>{num(currentSample?.output_voltage, 3)} <small>V</small></dd></div>
@@ -270,7 +269,7 @@ function App() {
             <div><dt>电池充电功率 · 估算</dt><dd>{num(currentSample?.battery_charge_power_candidate_w)} <small>W</small></dd></div>
             <div><dt>电池放电电流 · 估算</dt><dd>{num(currentSample?.battery_discharge_current_candidate_a, 3)} <small>A</small></dd></div>
           </dl>
-          <p className="telemetry-note">电流为设备换算值，尚无独立精度验证；放电功率校准不改变这里的电流。<a href="#diagnostics">数据说明 ↗</a></p>
+          <p className="telemetry-note">电流为设备换算值，尚无独立精度验证；放电功率校准不改变这里的电流。<a href="#diagnostics">数据说明 ↗</a></p></details>
         </section>
         <section className="detail-grid"><article className="panel trend">
           <div className="panel-heading"><div><h3 id="running-trend-heading" tabIndex={-1}>运行趋势 <span>{unit}</span></h3><p>{metric === 'ac_input_estimate_w' ? '交流输入估算 · 电池供电期间留空' : metric === 'battery_energy_estimate_w' ? '电池端估算 · 外部供电期间留空' : metric === 'cell_delta_mv' ? '同时查看压差均值与峰值 · 中断时段留空' : '历史趋势 · 中断时段留空'}</p></div></div>
@@ -281,7 +280,6 @@ function App() {
         </article>
         <CellBalanceCard sample={s} report={view?.cell_balance} fresh={!!fresh} trendHours={hours} trendMetric={metric} onTrend={showCellTrend} /></section>
         <EnergyUsageCard />
-        <UsageAnalysis />
         <BatteryCapacityCard />
         <section className="overview-records"><BatterySessionRecords days={sessionDays} onDaysChange={setSessionDays} />
         </section>
