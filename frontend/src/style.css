@@ -446,3 +446,5 @@ main:focus{outline:none}
   .update-key-input input{font-size:13px}
   .update-key-help code{font-size:10px}
 }
+
+.update-network{display:grid;gap:10px;margin:18px 0;max-width:620px}.update-network label{font-size:13px;color:#c1d2b5}.update-network select,.update-network input{width:100%;min-width:0;max-width:100%;box-sizing:border-box;color:#eaf0e8;background:#111818;border:1px solid #4d6050;border-radius:7px;min-height:44px;font:inherit;padding:10px 12px}.update-network select:focus-visible,.update-network input:focus-visible{outline:2px solid var(--lime);outline-offset:3px}

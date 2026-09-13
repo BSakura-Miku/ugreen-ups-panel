@@ -38,8 +38,12 @@ export function collectorAdminKeyReady(value: string): boolean {
 export function collectorUpdateRequest(action: CollectorUpdateAction, key: string, body: Record<string, unknown> = {}) {
   if (!['check', 'install', 'rollback'].includes(action)) throw new Error('不支持的采集器操作。');
   if (action !== 'check' && !collectorAdminKeyReady(key)) throw new Error('请输入有效的管理密钥。');
-  const payload = action === 'check' ? {} : action === 'install' ? collectorReleaseTarget(body) : collectorRollbackBody(body);
+  let payload = action === 'check' ? {} : action === 'install' ? collectorReleaseTarget(body) : collectorRollbackBody(body);
   if (!payload) throw new Error('更新目标已失效，请重新检查。');
+  if ((action === 'check' || action === 'install') && body.download_proxy !== undefined) {
+    if (typeof body.download_proxy !== 'string' || body.download_proxy.length > 200) throw new Error('加速地址无效。');
+    payload = { ...payload, download_proxy: body.download_proxy };
+  }
   return {
     url: `/api/collector-update/${action}`,
     init: {
@@ -75,6 +79,7 @@ export function collectorStageLabel(stage: unknown): string {
 export function collectorUpdateError(code: unknown, status = 0): string {
   const messages: Record<string, string> = {
     unauthorized: '管理密钥未通过验证，请检查后重新输入。', busy: '已有操作正在进行，请等待完成。',
+    invalid_proxy: '加速地址无效，请使用不含账号、参数的公网 HTTPS 地址。',
     rate_limited: '操作过于频繁，请稍后再试。', service_unavailable: '更新服务暂不可用，请检查 NAS 上的更新服务。',
     incompatible_service: '更新服务版本与此面板不兼容，请按说明升级更新服务。',
     check_required: '请先检查最新稳定发行版。', stale_release: '发行信息已改变，请重新检查并确认目标版本。',
@@ -179,6 +184,10 @@ export function parseCollectorUpdateStatus(value: unknown): CollectorUpdateStatu
       error: isObject(item.error) && typeof item.error.code === 'string' ? { code: item.error.code.slice(0, 80), message: '' } : null };
   }
   const extended: Partial<CollectorUpdateStatus> = {};
+  if (isObject(value.network_settings) && value.network_settings.supported === true
+      && typeof value.network_settings.download_proxy === 'string' && value.network_settings.download_proxy.length <= 200) {
+    extended.network_settings = { supported: true, download_proxy: value.network_settings.download_proxy };
+  }
   if (isObject(value.automatic_check) && value.automatic_check.supported === true) {
     const check = value.automatic_check;
     extended.automatic_check = { supported: true, busy: check.busy === true, due: check.due === true,

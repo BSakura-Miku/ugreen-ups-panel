@@ -24,7 +24,7 @@ from .build_info import VERSION
 from .collector_health import calibration_readiness, environment_config
 from .update_client import (SCHEMA, SOCKET, MAX_REQUEST, MAX_RESPONSE, KEY_PATTERN, UpdateError,
                             build_value, hex_value, public_status, unavailable, version, version_tuple)
-from .update_release import ReleaseClient, ReleaseError, extract_package
+from .update_release import ReleaseClient, ReleaseError, extract_package, normalize_download_proxy
 
 
 @dataclass(frozen=True)
@@ -205,7 +205,9 @@ def run_helper(paths, action, current_hash, source=None, progress=None):
 class UpdateManager:
     def __init__(self, paths=None, release_client=None, helper=None):
         self.paths = paths or UpdaterPaths()
+        self.download_proxy = ''
         self.client = release_client or ReleaseClient()
+        self.network_requests = deque(maxlen=10)
         self.helper = helper or run_helper
         self.lock = threading.RLock()
         self.worker = None
@@ -236,6 +238,10 @@ class UpdateManager:
     def _load_state(self):
         try:
             saved = read_json(self.paths.state / 'state.json', uid=self.paths.trusted_uid)
+            proxy = normalize_download_proxy(saved.get('download_proxy', ''))
+            if proxy:
+                self.client = ReleaseClient(download_proxy=proxy)
+                self.download_proxy = proxy
             # Latest release objects are deliberately not trusted after service restart.
             # A new release check is required before any further installation.
             status = unavailable('ready')
@@ -248,12 +254,12 @@ class UpdateManager:
                 self._save()
         except FileNotFoundError:
             pass
-        except (OSError, ValueError, TypeError, UpdateError, RecursionError):
+        except (OSError, ValueError, TypeError, UpdateError, ReleaseError, RecursionError):
             # Corrupt state cannot authorize a version or a recovery command.
             self.operation = None
 
     def _save(self):
-        data = json.dumps({'schema': SCHEMA, 'operation': self.operation}, allow_nan=False).encode()
+        data = json.dumps({'schema': SCHEMA, 'operation': self.operation, 'download_proxy': self.download_proxy}, allow_nan=False).encode()
         descriptor, temporary = tempfile.mkstemp(prefix='.state-', dir=self.paths.state)
         try:
             with os.fdopen(descriptor, 'wb') as stream:
@@ -323,6 +329,7 @@ class UpdateManager:
                           source_status=source_status, source_error=UpdateError(source_code).public() if source_code else None,
                           runtime=runtime, preflight=preflight,
                           checked_at=self.checked_at, rollback=rollback_status(self.paths),
+                          network_settings={'supported': True, 'download_proxy': self.download_proxy},
                           automatic_check={'supported': True, 'busy': self.checking, 'due': self._check_due(),
                                            'error': self.check_error},
                           operation=dict(self.operation) if self.operation else None)
@@ -339,10 +346,43 @@ class UpdateManager:
                 and time.monotonic() >= self.next_check
                 and (self.checked_at is None or time.time() - self.checked_at >= 3600))
 
-    def check_cached(self):
+    def _network_budget(self):
+        now = time.monotonic()
+        while self.network_requests and now - self.network_requests[0] > 60:
+            self.network_requests.popleft()
+        if len(self.network_requests) >= 10:
+            raise UpdateError('rate_limited')
+        self.network_requests.append(now)
+
+    def check_cached(self, payload=None):
         """Public bounded metadata lookup; never changes installation history."""
         with self.lock:
+            payload = payload or {}
+            try:
+                proxy = normalize_download_proxy(payload.get('download_proxy', self.download_proxy))
+            except ReleaseError:
+                raise UpdateError('invalid_proxy') from None
+            changed = proxy != self.download_proxy
+            if changed:
+                if self.stopping or self.checking or (self.operation and self.operation['busy']):
+                    raise UpdateError('busy')
+                self._network_budget()
+                previous = self.client, self.download_proxy
+                try:
+                    client = ReleaseClient(download_proxy=proxy)
+                except ReleaseError as exc:
+                    raise UpdateError(exc.code) from None
+                self.client, self.download_proxy = client, proxy
+                try:
+                    self._save()
+                except OSError:
+                    self.client, self.download_proxy = previous
+                    raise UpdateError('internal_error') from None
+                # Never present metadata learned through another route as fresh.
+                self.latest, self.checked_at, self.check_error, self.next_check = None, None, None, 0.0
             if self._check_due():
+                if not changed:
+                    self._network_budget()
                 self.checking = True
                 self.check_worker = threading.Thread(target=self._check_cached, daemon=False)
                 self.check_worker.start()
@@ -388,9 +428,9 @@ class UpdateManager:
         if action not in ('check', 'install', 'rollback') or set(request) != {'schema', 'action', 'key', 'payload'}:
             raise UpdateError('invalid_request')
         if action == 'check' and request.get('key') is None:
-            if request['payload'] != {}:
+            if not isinstance(request['payload'], dict) or set(request['payload']) - {'download_proxy'}:
                 raise UpdateError('invalid_request')
-            return self.check_cached()
+            return self.check_cached(request['payload'])
         with self.lock:
             self._authenticate(request.get('key'))
             if self.stopping or self.checking or (self.operation and self.operation['busy']):
@@ -398,7 +438,7 @@ class UpdateManager:
             payload = request['payload']
             required = {'check': set(), 'install': {'version', 'release_id', 'sha256'},
                         'rollback': {'version', 'current_version'}}[action]
-            if not isinstance(payload, dict) or set(payload) != required:
+            if not isinstance(payload, dict) or set(payload) - ({'download_proxy'} if action == 'install' else set()) != required:
                 raise UpdateError('invalid_request')
             current = self._current()
             configuration_before = None
@@ -411,6 +451,8 @@ class UpdateManager:
                     raise UpdateError('invalid_request')
                 target = payload['version']
             if action == 'install':
+                if payload.get('download_proxy', self.download_proxy) != self.download_proxy:
+                    raise UpdateError('stale_release')
                 if type(payload.get('release_id')) is not int or not hex_value(payload.get('sha256'), 64):
                     raise UpdateError('invalid_request')
                 if self.latest is None or self.checked_at is None or time.time() - self.checked_at > 3600:

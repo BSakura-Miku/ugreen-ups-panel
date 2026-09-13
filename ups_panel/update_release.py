@@ -9,7 +9,9 @@ import ast
 from dataclasses import asdict, dataclass
 from datetime import datetime
 import hashlib
-from http.client import HTTPException
+import ipaddress
+import socket
+from http.client import HTTPException, HTTPSConnection
 import json
 import math
 import os
@@ -19,7 +21,7 @@ import tarfile
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener, getproxies
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request, build_opener, getproxies
 import zlib
 
 REPOSITORY = 'BSakura-Miku/ugreen-ups-panel'
@@ -41,7 +43,7 @@ MAX_TIMEOUT = 15
 _VERSION = r'(?:0|[1-9][0-9]{0,5})\.(?:0|[1-9][0-9]{0,5})\.(?:0|[1-9][0-9]{0,5})'
 _PY_NAME = re.compile(r'ups_panel/[A-Za-z_][A-Za-z0-9_]{0,63}\.py\Z')
 ERROR_CODES = frozenset({
-    'network_error', 'response_too_large', 'untrusted_url', 'invalid_response',
+    'invalid_proxy', 'network_error', 'response_too_large', 'untrusted_url', 'invalid_response',
     'no_stable_release', 'invalid_release', 'asset_missing', 'invalid_digest',
     'checksum_mismatch', 'release_changed', 'invalid_package',
     'incompatible_package', 'unsafe_destination', 'package_write_failed',
@@ -164,6 +166,82 @@ def _proxy_handler():
     return ProxyHandler(proxies)
 
 
+def normalize_download_proxy(value):
+    if value == '':
+        return ''
+    _require(isinstance(value, str) and len(value) <= 200, 'invalid_proxy')
+    try:
+        url = urlsplit(value)
+        _require(url.scheme == 'https' and url.hostname and url.username is None
+                 and url.password is None and not url.query and not url.fragment
+                 and not any(ord(c) <= 32 or ord(c) >= 127 for c in value)
+                 and (url.port is None or 1 <= url.port <= 65535)
+                 and re.fullmatch(r'/[A-Za-z0-9._/-]*', url.path or '/')
+                 and '..' not in url.path and '%' not in value, 'invalid_proxy')
+        host = url.hostname
+        try:
+            address = ipaddress.ip_address(host)
+            _require(address.is_global and not getattr(address, 'ipv4_mapped', None), 'invalid_proxy')
+        except ValueError:
+            _require('.' in host and re.fullmatch(r'[a-z0-9.-]+', host)
+                     and not host.endswith(('.local', '.localhost', '.internal', '.')),
+                     'invalid_proxy')
+        return 'https://' + url.netloc.lower() + (url.path or '/').rstrip('/') + '/'
+    except (ValueError, UnicodeError):
+        raise ReleaseError('invalid_proxy') from None
+
+
+def _public_connection(address, timeout=15, source_address=None):
+    # Resolve once, reject private destinations, and connect to the checked IP.
+    # This also prevents a custom accelerator from rebinding into the NAS LAN.
+    rows = socket.getaddrinfo(address[0], address[1], type=socket.SOCK_STREAM)
+    _require(bool(rows), 'network_error')
+    for row in rows:
+        ip = ipaddress.ip_address(row[4][0])
+        _require(ip.is_global and not getattr(ip, 'ipv4_mapped', None)
+                 and not getattr(ip, 'sixtofour', None) and not getattr(ip, 'teredo', None), 'invalid_proxy')
+    deadline = time.monotonic() + timeout
+    for family, kind, protocol, _, target in rows[:8]:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        connection = socket.socket(family, kind, protocol)
+        try:
+            connection.settimeout(remaining)
+            if source_address:
+                connection.bind(source_address)
+            connection.connect(target)
+            return connection
+        except OSError:
+            connection.close()
+    raise OSError('Accelerator connection failed')
+
+
+class _PublicHTTPSConnection(HTTPSConnection):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._create_connection = _public_connection
+
+
+class _PublicHTTPSHandler(HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(_PublicHTTPSConnection, req, context=self._context)
+
+
+class _MirrorRedirects(_Redirects):
+    def __init__(self, prefix):
+        self.prefix = prefix
+
+    def original(self, url):
+        _require(url.startswith(self.prefix), 'untrusted_url')
+        return _trusted_url(url[len(self.prefix):])
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        original = self.original(newurl) if newurl.startswith(self.prefix) else _trusted_url(newurl)
+        _require(req.get_method() == 'GET' and code in (301, 302, 303, 307, 308), 'untrusted_url')
+        return Request(self.prefix + original, headers=_headers(original), method='GET')
+
+
 @dataclass(frozen=True)
 class CollectorRelease:
     version: str
@@ -185,20 +263,25 @@ class CollectorRelease:
 class ReleaseClient:
     """Small bounded public client. Tests may inject an opener.open(req, timeout)."""
 
-    def __init__(self, opener=None, timeout=MAX_TIMEOUT):
+    def __init__(self, opener=None, timeout=MAX_TIMEOUT, download_proxy=''):
         _require(type(timeout) in {int, float} and math.isfinite(timeout)
                  and 0 < timeout <= MAX_TIMEOUT, 'invalid_response')
+        self.download_proxy = normalize_download_proxy(download_proxy)
+        self.mirror_redirects = _MirrorRedirects(self.download_proxy) if self.download_proxy else None
+        self.mirror_opener = (opener if opener is not None else build_opener(ProxyHandler({}), _PublicHTTPSHandler(), self.mirror_redirects)) if self.download_proxy else None
         self.timeout = timeout
         self.opener = opener if opener is not None else build_opener(_proxy_handler(), _Redirects())
 
     def _read(self, url, limit):
         _trusted_url(url, initial=True)
-        request = Request(url, headers=_headers(url), method='GET')
+        accelerated = bool(self.download_proxy) and not (self.download_proxy == 'https://ghproxy.net/' and urlsplit(url).hostname == 'api.github.com')
+        request = Request(self.download_proxy + url if accelerated else url, headers=_headers(url), method='GET')
         started = time.monotonic()
         try:
-            open_url = self.opener.open if hasattr(self.opener, 'open') else self.opener
+            opener = self.mirror_opener if accelerated else self.opener
+            open_url = opener.open if hasattr(opener, 'open') else opener
             with open_url(request, timeout=self.timeout) as response:
-                _trusted_url(response.geturl())
+                self.mirror_redirects.original(response.geturl()) if accelerated else _trusted_url(response.geturl())
                 _require(response.getcode() == 200, 'network_error')
                 encoding = response.headers.get('Content-Encoding', 'identity')
                 _require(encoding.lower() == 'identity', 'invalid_response')

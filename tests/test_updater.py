@@ -595,3 +595,33 @@ def test_public_check_cannot_install_or_accept_payload(rig):
         with pytest.raises(UpdateError):
             rig.manager.request({'schema': 1, 'action': action, 'payload': payload, 'key': None})
     assert rig.client.checks == 0 and not rig.helper_state.calls
+
+
+def test_network_selection_persists_and_keeps_installation_history(rig, monkeypatch):
+    checked(rig)
+    previous = dict(rig.manager.operation)
+    monkeypatch.setattr(updater, 'ReleaseClient', lambda **kwargs: rig.client)
+    request = {'schema': 1, 'action': 'check', 'payload': {'download_proxy': 'https://gh-proxy.com'}, 'key': None}
+    rig.manager.request(request)
+    rig.manager.check_worker.join(timeout=2)
+    status = rig.manager.status()
+    assert status['network_settings']['download_proxy'] == 'https://gh-proxy.com/'
+    assert status['operation'] == previous and rig.client.checks == 2
+    restarted = updater.UpdateManager(rig.paths, rig.client, rig.manager.helper)
+    assert restarted.download_proxy == 'https://gh-proxy.com/' and restarted.latest is None
+    restarted.close()
+    with pytest.raises(UpdateError) as error:
+        mutation(rig.manager, 'install', dict(version=rig.release.version, release_id=rig.release.release_id,
+            sha256=rig.release.sha256, download_proxy=''))
+    assert error.value.code == 'stale_release'
+    assert not rig.helper_state.calls
+
+
+def test_repeated_route_changes_cannot_bypass_network_rate_limit(rig, monkeypatch):
+    monkeypatch.setattr(updater, 'ReleaseClient', lambda **kwargs: rig.client)
+    for i in range(10):
+        rig.manager.request({'schema': 1, 'action': 'check', 'payload': {'download_proxy': f'https://mirror{i}.example/'}, 'key': None})
+        rig.manager.check_worker.join(timeout=2)
+    with pytest.raises(UpdateError) as error:
+        rig.manager.request({'schema': 1, 'action': 'check', 'payload': {'download_proxy': ''}, 'key': None})
+    assert error.value.code == 'rate_limited' and rig.client.checks == 10

@@ -14,6 +14,7 @@ KEY_PATTERN = re.compile(r'[A-Za-z0-9_-]{43}')
 STAGES = ('checking', 'downloading', 'verifying', 'installing', 'restarting', 'validating',
           'rolling_back', 'succeeded', 'failed', 'interrupted')
 ERRORS = {
+    'invalid_proxy': '加速地址无效，请使用不含账号、参数的公网 HTTPS 地址。',
     'invalid_request': '更新请求无效，请刷新页面后重试。',
     'unauthorized': '管理密钥不正确，请核对 NAS 上保存的密钥。',
     'busy': '已有更新操作正在进行，请等待完成。',
@@ -114,6 +115,11 @@ def public_status(value):
     result = unavailable('ready')
     result.update(installed=True, installation_status='confirmed', updater_version=value['updater_version'],
                   current=build_value(value.get('current')), checked_at=timestamp(value.get('checked_at')))
+    network = value.get('network_settings')
+    if isinstance(network, dict) and network.get('supported') is True:
+        proxy = network.get('download_proxy')
+        if isinstance(proxy, str) and len(proxy) <= 200:
+            result['network_settings'] = {'supported': True, 'download_proxy': proxy}
     check = value.get('automatic_check')
     if isinstance(check, dict) and check.get('supported') is True:
         error = check.get('error')

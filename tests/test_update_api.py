@@ -155,3 +155,13 @@ def test_install_and_rollback_still_require_key(client, action):
     response = client.post('/api/collector-update/' + action, json={}, headers={'X-UPS-Update': '1'})
     assert response.status_code == 401
     assert not client.host_updater.calls
+
+
+def test_public_network_selection_only_accepts_fixed_schema(client):
+    payload = {'download_proxy': 'https://gh-proxy.com/'}
+    response = client.post('/api/collector-update/check', json=payload, headers={'X-UPS-Update': '1'})
+    assert response.status_code == 202
+    assert client.host_updater.calls == [('check', payload, None)]
+    response = client.post('/api/collector-update/check', json={**payload, 'url':'https://evil.invalid'}, headers={'X-UPS-Update': '1'})
+    assert response.status_code == 400
+    assert len(client.host_updater.calls) == 1

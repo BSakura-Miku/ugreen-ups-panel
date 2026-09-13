@@ -84,7 +84,7 @@ def install_update_routes(app, read_snapshot, client=None, *, calibration_status
             payload = json.loads(body, parse_constant=lambda _: (_ for _ in ()).throw(ValueError('Invalid number')))
             required = {'check': set(), 'install': {'version', 'release_id', 'sha256'},
                         'rollback': {'version', 'current_version'}}[action]
-            if not isinstance(payload, dict) or set(payload) != required:
+            if not isinstance(payload, dict) or set(payload) - ({'download_proxy'} if action in ('check', 'install') else set()) != required:
                 raise ValueError
         except (ValueError, TypeError, RecursionError):
             reject('invalid_request', 400)

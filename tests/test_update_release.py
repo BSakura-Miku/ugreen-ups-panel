@@ -648,3 +648,54 @@ def test_packager_rejects_missing_or_invalid_license(source, content):
         path.write_bytes(content)
     with pytest.raises((ValueError, release.ReleaseError)):
         PACKAGER['make_package'](source, REVISION)
+
+
+@pytest.mark.parametrize('proxy,api_proxy', [('https://gh-proxy.com/', True), ('https://ghproxy.net/', False), ('https://mirror.example/cache/', True)])
+def test_acceleration_covers_query_and_download_with_digest_validation(package, proxy, api_proxy):
+    data, _ = package
+    api_prefix = proxy if api_proxy else ''
+    opener = Opener([(api_prefix + release.LATEST_URL, listing(data)),
+                     (api_prefix + BY_ID_URL, listing(data)), (proxy + ASSET_URL, data)])
+    client = release.ReleaseClient(opener, download_proxy=proxy)
+    latest = client.latest()
+    assert latest.asset_url == ASSET_URL
+    assert client.download(latest) == data
+    assert not opener.responses
+
+
+@pytest.mark.parametrize('value', ['http://mirror.example/', 'https://user:secret@mirror.example/',
+    'https://mirror.example/?key=secret', 'https://127.0.0.1/', 'https://[::1]/', 'https://10.0.0.1/',
+    'https://localhost/', 'https://nas.local/', 'https://mirror.example/../', 'https://mirror.example/%2e/',
+    'https://mirror.example/#fragment', None, 'https://mirror.example/\n'])
+def test_invalid_custom_accelerators_rejected_before_network(value):
+    with pytest.raises(release.ReleaseError, match='invalid_proxy'):
+        release.ReleaseClient(download_proxy=value)
+
+
+def test_accelerator_redirects_never_escape_chosen_service_or_forward_credentials():
+    proxy = 'https://mirror.example/'
+    redirect = release._MirrorRedirects(proxy)
+    request = Request(proxy + ASSET_URL, headers={'Authorization': 'secret', 'Cookie': 'secret'})
+    result = redirect.redirect_request(request, None, 302, '', {}, ASSET_URL)
+    assert result.full_url == proxy + ASSET_URL
+    assert not any(k.lower() in ('authorization', 'cookie') for k in result.headers)
+    for target in ['http://127.0.0.1/', 'https://evil.example/file', proxy + 'https://github.com/other/repo']:
+        with pytest.raises(release.ReleaseError):
+            redirect.redirect_request(request, None, 302, '', {}, target)
+
+
+def test_custom_domain_resolving_to_private_address_never_connects(monkeypatch):
+    monkeypatch.setattr(release.socket, 'getaddrinfo', lambda *a, **k: [(2, 1, 6, '', ('10.0.0.1', 443))])
+    monkeypatch.setattr(release.socket, 'socket', lambda *a, **k: pytest.fail('private socket was created'))
+    with pytest.raises(release.ReleaseError, match='invalid_proxy'):
+        release._public_connection(('mirror.example', 443))
+
+
+def test_accelerated_package_tampering_still_fails_checksum(package):
+    data, _ = package
+    proxy = 'https://gh-proxy.com/'
+    opener = Opener([(proxy + release.LATEST_URL, listing(data)), (proxy + BY_ID_URL, listing(data)),
+                     (proxy + ASSET_URL, b'x' * len(data))])
+    client = release.ReleaseClient(opener, download_proxy=proxy)
+    with pytest.raises(release.ReleaseError, match='checksum_mismatch'):
+        client.download(client.latest())

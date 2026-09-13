@@ -200,3 +200,14 @@ test('automatic checks need no key and preserve separate cached status', () => {
   assert.equal(parsed.latest.version, status.latest.version);
   for (const action of ['install','rollback']) assert.throws(() => collectorUpdateRequest(action, '', target));
 });
+
+test('network choice goes in the request body and install keeps its reviewed route', () => {
+  const choice = {download_proxy:'https://gh-proxy.com/'};
+  const check = collectorUpdateRequest('check', key, choice);
+  assert.deepEqual(JSON.parse(check.init.body), choice);
+  assert.equal(check.init.headers['X-UPS-Update-Key'], undefined);
+  const install = collectorUpdateRequest('install', key, {...target,...choice});
+  assert.deepEqual(JSON.parse(install.init.body), {...target,...choice});
+  assert.equal(install.init.headers['X-UPS-Update-Key'], key);
+  assert.equal(parseCollectorUpdateStatus({...status,network_settings:{supported:true,...choice}}).network_settings.download_proxy,choice.download_proxy);
+});

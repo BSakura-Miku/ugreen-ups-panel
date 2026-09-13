@@ -301,6 +301,7 @@ export type CollectorUpdateAvailability = 'ready' | 'not_installed' | 'unreachab
 export type CollectorUpdateStage = 'checking' | 'downloading' | 'verifying' | 'installing' | 'restarting' | 'validating'
   | 'rolling_back' | 'succeeded' | 'failed' | 'interrupted';
 export type CollectorUpdateStatus = {
+  network_settings?: { supported: true; download_proxy: string };
   automatic_check?: { supported: true; busy: boolean; due: boolean; error: { code: string; message: string } | null };
   connection_reason?: string;
   installation_status?: 'unknown' | 'confirmed';

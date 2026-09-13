@@ -8,7 +8,7 @@ import { COLLECTOR_UPDATE_DOCS, collectorAdminKeyReady, collectorOperationResult
 import { readJson, startVisiblePolling } from './readPolling';
 import type { CollectorReleaseTarget, CollectorRollbackTarget, CollectorUpdateAction } from './collectorUpdate';
 
-type Intent = { action: 'install'; target: CollectorReleaseTarget; fromVersion: string }
+type Intent = { action: 'install'; downloadProxy: string; target: CollectorReleaseTarget; fromVersion: string }
   | { action: 'rollback'; target: CollectorRollbackTarget };
 type Props = { fallbackCurrent?: DiagnosticBuild | null; diagnosticsFresh?: boolean; captureFresh?: boolean; checks?: DiagnosticCheck[] };
 const checkLabels: Record<DiagnosticCheck['status'], string> = { ok: '已确认', waiting: '等待', warning: '需关注', unknown: '未知', error: '异常' };
@@ -26,6 +26,15 @@ function CollectorUpdateContent({ fallbackCurrent, diagnosticsFresh = false, cap
   const [readError, setReadError] = useState('');
   const [actionError, setActionError] = useState('');
   const [adminKey, setAdminKey] = useState('');
+  const [proxyChoice, setProxyChoice] = useState('');
+  const [customProxy, setCustomProxy] = useState('');
+  const appliedProxy = status?.network_settings?.download_proxy || '';
+  const selectedProxy = proxyChoice === 'custom' ? customProxy.trim() : proxyChoice;
+  useEffect(() => {
+    setProxyChoice(['', 'https://gh-proxy.com/', 'https://ghproxy.net/'].includes(appliedProxy) ? appliedProxy : 'custom');
+    setCustomProxy(appliedProxy);
+    setIntent(null);
+  }, [appliedProxy]);
   const [controlsOpen, setControlsOpen] = useState(false);
   const [keyVisible, setKeyVisible] = useState(false);
   const [intent, setIntent] = useState<Intent | null>(null);
@@ -76,11 +85,11 @@ function CollectorUpdateContent({ fallbackCurrent, diagnosticsFresh = false, cap
   const ready = recent && status?.installed === true && status.availability === 'ready';
   const locked = !!pending || busy || awaitingStatus || !ready;
   const preflightIssue = collectorPreflightIssue(status);
-  const changeLocked = locked || !!preflightIssue || status?.automatic_check?.busy === true;
+  const changeLocked = locked || !!preflightIssue || status?.automatic_check?.busy === true || selectedProxy !== appliedProxy;
   const keyReady = collectorAdminKeyReady(adminKey);
   const installable = !!target && !!currentVersion && status?.update_available === true;
   const intentCurrent = intent?.action === 'install'
-    ? installable && sameCollectorTarget(intent.target, target) && intent.fromVersion === currentVersion
+    ? intent.downloadProxy === appliedProxy && installable && sameCollectorTarget(intent.target, target) && intent.fromVersion === currentVersion
     : intent?.action === 'rollback' ? !!rollback && intent.target.version === rollback.version && intent.target.current_version === rollback.current_version : false;
   const operation = status?.operation;
   const runtimeVersion = fallbackCurrent?.version || status?.runtime?.version || null;
@@ -95,13 +104,13 @@ function CollectorUpdateContent({ fallbackCurrent, diagnosticsFresh = false, cap
     if (!controlsAvailable) { setControlsOpen(false); setAdminKey(''); setKeyVisible(false); setIntent(null); }
   }, [controlsAvailable]);
 
-  async function submit(action: CollectorUpdateAction, reviewed?: Intent) {
+  async function submit(action: CollectorUpdateAction, reviewed?: Intent, proxy?: string) {
     if (mutationLock.current || locked || (action !== 'check' && !keyReady)) return;
     if (action !== 'check' && changeLocked) return;
-    let body: Record<string, unknown> = {};
+    let body: Record<string, unknown> = action === 'check' && proxy !== undefined ? { download_proxy: proxy } : {};
     if (action === 'install') {
       if (reviewed?.action !== 'install' || !intentCurrent || !sameCollectorTarget(reviewed.target, target)) return;
-      body = reviewed.target;
+      body = { ...reviewed.target, download_proxy: reviewed.downloadProxy };
     } else if (action === 'rollback') {
       if (reviewed?.action !== 'rollback' || !intentCurrent || !rollback) return;
       body = reviewed.target;
@@ -139,7 +148,7 @@ function CollectorUpdateContent({ fallbackCurrent, diagnosticsFresh = false, cap
 
   const selectInstall = () => {
     if (changeLocked || !target || !currentVersion || !installable) return;
-    setActionError(''); setIntent({ action: 'install', target: { ...target }, fromVersion: currentVersion });
+    setActionError(''); setIntent({ action: 'install', downloadProxy: appliedProxy, target: { ...target }, fromVersion: currentVersion });
   };
   const selectRollback = () => {
     if (changeLocked || !rollback) return;
@@ -150,6 +159,20 @@ function CollectorUpdateContent({ fallbackCurrent, diagnosticsFresh = false, cap
     <div className="update-heading"><h3 id="collector-update-heading"><ArrowDownToLine size={18}/>采集器更新</h3><span className="update-service-status">{pending || busy ? '操作进行中' : !status ? '读取状态中' : status.availability === 'ready' && recent ? '手动更新' : '暂不可用'}</span></div>
     <p className="update-note">打开此页后自动检查最新稳定版，结果缓存 1 小时；安装与回退需要管理密钥和确认。这里只更新 NAS 上的采集器，面板镜像仍通过 Docker 更新。</p>
     <dl className="update-versions"><div><dt>已安装采集器源码</dt><dd>{diagnosticVersion(currentVersion)}</dd></div><div><dt>{runtimeFresh ? '实际运行版本' : '最近报告版本'}</dt><dd>{diagnosticVersion(runtimeVersion)}</dd></div><div><dt>最新稳定版</dt><dd>{status?.latest?.version || (status?.automatic_check?.busy ? '正在检查…' : '尚未检查')}</dd></div><div><dt>宿主更新服务</dt><dd>{diagnosticVersion(status?.updater_version)}</dd></div></dl>
+    {status?.network_settings?.supported && <section className="update-network" aria-label="更新联网方式">
+      <label htmlFor="collector-network">更新联网方式</label>
+      <select id="collector-network" value={proxyChoice} disabled={locked || status.automatic_check?.busy} onChange={event => { setProxyChoice(event.target.value); setIntent(null); }}>
+        <option value="">直连 GitHub</option>
+        <option value="https://gh-proxy.com/">gh-proxy.com（查询和下载加速）</option>
+        <option value="https://ghproxy.net/">ghproxy.net（仅下载加速）</option>
+        <option value="custom">自定义加速地址</option>
+      </select>
+      {proxyChoice === 'custom' && <input aria-label="自定义加速地址" type="url" maxLength={200} value={customProxy} placeholder="https://example.com/" disabled={locked || status.automatic_check?.busy} onChange={event => { setCustomProxy(event.target.value); setIntent(null); }}/>}</section>}
+    {status?.network_settings?.supported && <>
+      <p className="update-note">{proxyChoice === 'https://ghproxy.net/' ? '此站仅加速安装包下载，版本查询仍需直连 GitHub。' : proxyChoice === 'custom' ? '填写 HTTPS 地址前缀，服务需支持在前缀后拼接完整 GitHub 链接，并支持 GitHub API。' : '选择的方式同时用于版本查询与安装包下载。'}设置保存在 NAS，切换后重新检查。</p>
+      {selectedProxy && <p className="update-note">加速站会转发公开发行信息和安装包，请选择可信站点。管理密钥不会发送给加速站。</p>}
+      <button type="button" className="update-button" disabled={locked || status.automatic_check?.busy || (proxyChoice === 'custom' && !selectedProxy)} onClick={() => void submit('check', undefined, selectedProxy)}>保存并检查</button>
+    </>}
     {currentVersion && runtimeVersion && currentVersion !== runtimeVersion && <p className="update-feedback" role="status">已安装源码与采集器运行报告的版本不同，请核对服务实际使用的源码目录和进程。</p>}
     {preflightIssue && <p className="update-feedback" role="status">更新预检未通过：{preflightIssue}</p>}
     {!preflightIssue && status?.installed && <p className="update-note">{status.preflight?.ready ? '当前配置预检已通过。' : '宿主更新服务尚未提供完整配置预检，请按说明升级更新服务以启用检查。'}{status.source_status === 'unverified' ? ' 此安装没有可核验的发行源码指纹。' : status.source_status === 'verified' ? ' 已安装源码指纹已核验。' : ''}</p>}
