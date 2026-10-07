@@ -4,9 +4,22 @@
 
 <p align="center"><img src="frontend/src/assets/us3000-logo.png" width="80" height="80" alt="US3000 Monitor Logo" /></p>
 
-![US3000 v0.12.0 面板预览：用电月历、历史趋势、容量参考与电芯读数（演示数据）](docs/assets/dashboard-demo.png)
+![US3000 v0.14.5 电力概览：实时读数、用电费用、运行趋势与电池摘要（演示数据）](docs/assets/dashboard-demo.png)
 
-*v0.12.0 界面，使用 DEMO 演示数据，不包含实际 NAS 数据或序列号。*
+*v0.14.5 界面，使用 DEMO 演示数据，不包含实际 NAS 数据或序列号。*
+
+<details>
+<summary>更多界面：用电分析与电池供电详情</summary>
+
+**用电分析 · 浅色外观**
+
+![v0.14.5 用电分析：记录覆盖率、用电月历与费用（演示数据）](docs/assets/energy-demo.png)
+
+**电池与供电 · 深色外观**
+
+![v0.14.5 电池与供电：电芯读数、容量参考与放电详情（演示数据）](docs/assets/battery-demo.png)
+
+</details>
 
 为 UGREEN US3000 提供供电状态、电量、电芯电压与历史趋势。宿主机采集器通过 Linux usbmon 只读观察已有 UPS 驱动的数据，Docker Compose 启动网页面板。
 
