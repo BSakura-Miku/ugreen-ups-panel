@@ -79,6 +79,7 @@ export default function BatteryCapacityCard() {
   const view = capacityPresentation(visibleReport, readError);
   const comparison = capacityComparisonValues(visibleReport);
   const blocked = !visibleReport || ['not_configured', 'incompatible'].includes(visibleReport.status) || visibleReport.reason === 'invalid_basis';
+  const accumulating = !!visibleReport && !blocked && view.sampleCount < 3;
   const baseline = blocked ? null : visibleReport.baseline;
   const progress = view.showProgress ? visibleReport?.progress : null;
   const resetReady = !!visibleReport?.current_basis && visibleReport.capture_fresh && visibleReport.reason !== 'stale' && !resetPending;
@@ -89,8 +90,8 @@ export default function BatteryCapacityCard() {
       <p>{visibleReport?.epoch ? <>参考起点 · {capacityDate(visibleReport.epoch.activated_at)}</> : readError ? '等待参考服务恢复' : '当前校准阶段 · 同区间能量比较'}</p>
     </div><span className={`capacity-state ${view.tone}`}>{view.label}</span></div>
     <div className="capacity-body">
-      <div className="capacity-index"><span>{view.historical && view.index !== null ? '上次观测指数' : '相对参考指数'}</span>
-        <strong>{capacityIndexLabel(view.index)}{view.index !== null && <small>%</small>}</strong>
+      <div className="capacity-index"><span>{accumulating ? '匹配记录进度' : view.historical && view.index !== null ? '上次观测指数' : '相对参考指数'}</span>
+        <strong className={accumulating ? "capacity-collecting" : ""}>{accumulating ? `样本积累中 · ${view.sampleCount}/3` : <>{capacityIndexLabel(view.index)}{view.index !== null && <small>%</small>}</>}</strong>{accumulating && view.index !== null && <p>初步参考 {capacityIndexLabel(view.index)}% · 不代表健康度</p>}
         <p>{view.isBaseline ? '本次校准基线 = 100%' : view.index !== null ? '相对本次校准基线' : '等待有效参考记录'}</p>
       </div>
       <div className="capacity-observation"><div className="capacity-section-label"><h4>90% → 80% 区间观察</h4><span>匹配放电 <strong>{view.sampleCount} / 3</strong></span></div>

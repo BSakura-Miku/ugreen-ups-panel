@@ -14,6 +14,8 @@ A UGREEN US3000 dashboard for power state, battery charge, cell voltages, and hi
 
 ## Features
 
+v0.14.5 separates overview, energy analysis, battery and power records, and device management, with system, dark and light themes. Expand power records for nearby trends, events and notes; edit effective tariffs to recalculate historical costs without changing the energy ledger.
+
 - Compact power-state and metric rows, with prominent battery-power alerts and qualified cell-difference warnings.
 - Charge percentage, input/output voltage, pack voltage, four cell voltages, and cell voltage difference.
 - Up to one year of history, power and connection events, and CSV export with averages and extrema.
@@ -92,7 +94,7 @@ The following is the manual alternative. Complete diagnostics need a v0.8.0 or n
   set -eu
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT
-  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.14.4 -o "$tmp_dir/source.tar.gz"
+  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.14.5 -o "$tmp_dir/source.tar.gz"
   tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir"
   sudo sh "$tmp_dir/scripts/install-collector.sh" --data-dir /volume1/docker/ugreen-ups-panel/data
   sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml pull
@@ -104,7 +106,7 @@ The default image is `bsakuramiku/ugreen-ups-panel:latest`; see [release notes](
 
 ## Web power calibration
 
-Open **功率校准** to view the active configuration, coefficients, and formulas. The assistant offers these steps:
+Open **设备管理 → 功率校准** to view the active configuration, coefficients, and formulas. The assistant offers these steps:
 
 1. **Confirm the adapter voltage.** The page suggests `12/19/20 V` from the adapter input reading, but requires your confirmation. UPS output voltage is not used for this selection.
 2. **Calibrate the AC baseline.** With stable external power and no charging, collect 30 seconds of telemetry, then enter the matching AC reading in watts from your smart plug or power meter. This step can be saved on its own to enable estimates while not charging.
@@ -179,7 +181,7 @@ The directory gets mode `0750`; existing `history.sqlite`, `history.sqlite-wal`,
 
 ## If there is no data
 
-Open **诊断与说明** to distinguish private-report, system-query, and history-write issues. On the NAS host, run the installed collector's read-only diagnosis:
+Open **设备管理 → 运行诊断** to distinguish private-report, system-query, and history-write issues. On the NAS host, run the installed collector's read-only diagnosis:
 
 ```sh
 cd /opt/ugreen-ups-panel/current

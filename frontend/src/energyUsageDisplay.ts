@@ -51,6 +51,7 @@ export type EnergyUsageMonth = EnergyMetadata & {
   days: EnergyDaySummary[];
 };
 export type EnergyUsageDay = EnergyMetadata & {
+  cost?: { date: string; estimate_cost: number | null; currency: string | null; rate: number | null; coverage_ratio: number | null };
   date: string;
   day: EnergyDaySummary;
   hours: EnergyHour[];
@@ -171,6 +172,7 @@ export function parseEnergyUsageMonth(value: unknown): EnergyUsageMonth | null {
 export function parseEnergyUsageDay(value: unknown): EnergyUsageDay | null {
   if (!validMetadata(value) || !validEnergyDate(value.date) || !validDay(value.day, value.current_date) || value.day.date !== value.date
     || !Array.isArray(value.hours) || value.hours.length !== 24 || !Array.isArray(value.bases)) return null;
+  if (value.cost !== undefined && (!object(value.cost) || value.cost.date !== value.date || !nullableNumber(value.cost.estimate_cost) || (value.cost.estimate_cost !== null && !nonnegative(value.cost.estimate_cost)) || !nullableNumber(value.cost.rate) || (value.cost.currency !== null && (typeof value.cost.currency !== 'string' || !/^[A-Z]{3}$/.test(value.cost.currency))))) return null;
   const hours = new Set<number>();
   for (const hour of value.hours) {
     if (!object(hour) || !count(hour.hour) || hour.hour > 23 || hours.has(hour.hour)

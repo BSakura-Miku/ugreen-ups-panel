@@ -15,9 +15,13 @@ import { historyPollInterval, startVisiblePolling } from './readPolling';
 import logo from './assets/us3000-logo.png';
 import './style.css';
 import './density.css';
+import './theme.css';
+import TodayMetrics from './TodayMetrics';
+import ThemePicker from './ThemePicker';
+import OverviewBrief from './OverviewBrief';
+import SessionTrend from './SessionTrend';
 const Chart = lazy(() => import('./HistoryChart'));
 
-type Event = { timestamp: number; kind: string; detail: string };
 const modes: Record<string, string> = { online: '外部供电', charging: '电池充电中', battery: '电池供电', unknown: '状态待确认' };
 const num = (n: number | null | undefined, digits = 1) => typeof n === 'number' && Number.isFinite(n) ? n.toFixed(digits) : '—';
 const timeLabel = (n: number) => new Date(n * 1000).toLocaleTimeString('zh-CN', { hour12: false });
@@ -125,6 +129,7 @@ function SessionStatus({ record, fresh }: { record: BatterySession; fresh: boole
 
 function BatterySessionRecords({ days, onDaysChange }: { days: number; onDaysChange: (days: number) => void }) {
   const [data, setData] = useState<BatterySessions | null>(null);
+  const [selectedSession, setSelectedSession] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   useEffect(() => {
@@ -147,21 +152,18 @@ function BatterySessionRecords({ days, onDaysChange }: { days: number; onDaysCha
         <div className="session-summary">
           <div><span>已确认切入次数</span><strong>{summary.confirmed_starts}<small>次</small></strong><p>范围内确认观察到外部供电切入电池供电</p></div>
           <div><span>已观测供电时长</span><strong>{durationLabel(summary.observed_duration_sec)}</strong><p>仅计范围内已观测的时段 · 时:分:秒</p></div>
-          <div><span>完整记录电量净下降</span><strong>{num(summary.soc_drop_pp, 1)}<small>百分点</small></strong><p>{summary.soc_records ? `来自 ${summary.soc_records} 条完全位于范围内的完整记录` : '范围内暂无可统计电量的完整记录'}</p></div>
+          <div><span>最近一次切入</span><strong className="session-latest">{data.records.length ? historyDate(data.records[0].start_ts) : '暂无记录'}</strong><p>最近 50 条内按时间排序</p></div>
         </div>
         <div className="session-summary-details"><span>完整 {summary.complete_count} 条</span><span>不完整 {summary.incomplete_count} 条</span><span>记录中 {summary.ongoing_count} 条</span></div>
-        <details className="session-scope"><summary>统计范围与记录方式</summary><p>{isFiniteNumber(data.recording_since) ? `开始记录于 ${historyDate(data.recording_since)}（本地时间），此前的供电过程不补算。` : '尚未开始记录，收到有效采集数据后自动记录。'}</p><p>次数只表示已记录且确认的供电切换，不是电池循环次数。进行中的时长只计到最近一次采样；负下降值表示终点电量高于起点。</p><p>每行 Wh 为该次观测范围内的电池端能量估算，覆盖率以首末电池供电样本之间的时长为分母。会话完整、能量全覆盖与满电到截止的容量测试含义不同，不能据此反推满容量或健康百分比。</p></details><p className="session-semantics">完整记录不等于能量全覆盖；Wh 为已观测区间的电池端估算，不能据此推算容量或健康度。</p>{!data.capture_fresh && <p className="session-capture-note">采集暂不可用，时长、电量与能量仅截至最后一次记录。</p>}
+        <details className="session-scope"><summary>统计范围与记录方式</summary><p>完整记录电量净下降合计 {num(summary.soc_drop_pp, 1)} 个百分点，来自 {summary.soc_records} 条记录；不代表单次电量或循环次数。</p><p>{isFiniteNumber(data.recording_since) ? `开始记录于 ${historyDate(data.recording_since)}（本地时间），此前的供电过程不补算。` : '尚未开始记录，收到有效采集数据后自动记录。'}</p><p>当前范围共 {data.total_records} 条记录{data.has_more ? `，显示最近 ${data.records.length} 条` : ''}；跨越边界的行保留该次完整观测，汇总时长只计所选范围。</p><p>次数只表示已记录且确认的供电切换，不是电池循环次数。进行中的时长只计到最近一次采样；负下降值表示终点电量高于起点。</p><p>每行 Wh 为该次观测范围内的电池端能量估算，覆盖率以首末电池供电样本之间的时长为分母。会话完整、能量全覆盖与满电到截止的容量测试含义不同，不能据此反推满容量或健康百分比。</p></details><p className="session-semantics">完整记录不等于能量全覆盖；Wh 为已观测区间的电池端估算，不能据此推算容量或健康度。</p>{!data.capture_fresh && <p className="session-capture-note">采集暂不可用，时长、电量与能量仅截至最后一次记录。</p>}
         {data.records.length ? <>
-          <p className="session-record-count">当前范围共 {data.total_records} 条记录{data.has_more ? `，显示最近 ${data.records.length} 条` : ''}。跨越边界的行保留该次完整观测和能量，汇总时长只计所选范围。逐次 Wh 不汇总为范围总能量。</p>
-          <table className="session-table"><caption className="visually-hidden">电池供电逐次记录与电池端能量估算，时间按本地显示</caption><colgroup><col className="session-col-start" /><col className="session-col-end" /><col className="session-col-duration" /><col className="session-col-soc" /><col className="session-col-drop" /><col className="session-col-energy" /><col className="session-col-status" /></colgroup><thead><tr><th scope="col">开始</th><th scope="col">结束 / 最近观测</th><th scope="col">持续时长</th><th scope="col">电量起止</th><th scope="col">电量变化</th><th scope="col">本次能量 · 估算</th><th scope="col">记录状态</th></tr></thead><tbody>{data.records.map(record => <tr key={record.id}>
-            <td><span className="session-mobile-label" aria-hidden="true">开始</span><div><SessionTime timestamp={record.start_ts} />{!record.start_known && <small>首次观察到电池供电</small>}</div></td>
-            <td><span className="session-mobile-label" aria-hidden="true">结束</span><div>{record.end_ts !== null ? <SessionTime timestamp={record.end_ts} /> : <><small>{record.status === 'ongoing' ? '尚未结束 · 最近观测' : '结束未确认 · 最后观测'}</small><SessionTime timestamp={record.last_ts} /></>}</div></td>
-            <td><span className="session-mobile-label" aria-hidden="true">持续时长</span><div><strong>{durationLabel(record.status === 'complete' ? record.duration_sec : record.observed_duration_sec)}</strong><small>{record.status === 'complete' ? '完整起止' : '已观测时长'}</small></div></td>
-            <td><span className="session-mobile-label" aria-hidden="true">电量起止</span><div><strong>{socLabel(record.start_soc)} → {socLabel(record.end_soc)}</strong><small>{record.status === 'complete' ? '完整起止电量' : '已观测端点电量'}</small></div></td>
-            <td><span className="session-mobile-label" aria-hidden="true">电量变化</span><div><strong>{num(record.soc_drop_pp, 1)}<small className="session-inline-unit">百分点</small></strong><small>{record.status === 'complete' ? '净下降' : '记录内下降'}</small></div></td>
-            <td><span className="session-mobile-label" aria-hidden="true">能量估算</span><BatterySessionEnergy energy={record.energy} /></td>
-            <td><span className="session-mobile-label" aria-hidden="true">状态</span><SessionStatus record={record} fresh={data.capture_fresh && !error} /></td>
-          </tr>)}</tbody></table>
+
+          <div className="session-cards">{data.records.map(record => <details key={record.id} className="session-record" open={selectedSession === record.id}>
+            <summary onClick={event => { event.preventDefault(); setSelectedSession(value => value === record.id ? null : record.id); }}><span>{historyDate(record.start_ts)}</span><strong>{durationLabel(record.status === 'complete' ? record.duration_sec : record.observed_duration_sec)}</strong><span>{socLabel(record.start_soc)} → {socLabel(record.end_soc)}</span><SessionStatus record={record} fresh={data.capture_fresh && !error}/></summary>
+            <div className="session-detail"><dl><div><dt>开始观测</dt><dd><SessionTime timestamp={record.start_ts}/>{!record.start_known && <small>实际切入时间未知</small>}</dd></div><div><dt>结束 / 最近观测</dt><dd><SessionTime timestamp={record.end_ts ?? record.last_ts}/></dd></div><div><dt>电量净下降</dt><dd>{num(record.soc_drop_pp, 1)} 个百分点</dd></div></dl><BatterySessionEnergy energy={record.energy}/>
+            {selectedSession === record.id && <SessionTrend record={record}/>}
+            {selectedSession === record.id && <EventTimeline window={{ start: Math.max(0, record.start_ts - 60), end: (record.end_ts ?? record.last_ts) + 60 }}/>}</div>
+          </details>)}</div>
         </> : <p className="session-empty">所选范围内暂无电池供电记录。</p>}
       </>}
     </>}
@@ -179,23 +181,28 @@ function App() {
   const [sessionDays, setSessionDays] = useState(90);
   const [metric, setMetric] = useState('ac_input_estimate_w');
   const [focusCells, setFocusCells] = useState(false);
-  const [tab, setTab] = useState(['hardware', 'diagnostics', 'calibration'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'overview');
-  useEffect(() => { const onHash = () => { const hash = location.hash.slice(1); if (hash !== 'main-content') setTab(['hardware', 'diagnostics', 'calibration'].includes(hash) ? hash : 'overview'); }; window.addEventListener('hashchange', onHash); return () => window.removeEventListener('hashchange', onHash); }, []);
+  const [focusTrend, setFocusTrend] = useState(false);
+  const [tab, setTab] = useState(['energy', 'battery', 'hardware', 'diagnostics', 'calibration', 'updates'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'overview');
+  useEffect(() => { const onHash = () => { const hash = location.hash.slice(1); if (hash !== 'main-content') setTab(['energy', 'battery', 'hardware', 'diagnostics', 'calibration', 'updates'].includes(hash) ? hash : 'overview'); }; window.addEventListener('hashchange', onHash); return () => window.removeEventListener('hashchange', onHash); }, []);
   useEffect(() => { window.scrollTo(0, 0); }, [tab]);
   useEffect(() => {
-    if (tab !== 'overview' || !focusCells) return;
+    if (tab !== 'battery' || !focusCells) return;
     const heading = document.getElementById('cell-balance-heading');
     heading?.focus({ preventScroll: true });
     heading?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
     setFocusCells(false);
   }, [tab, focusCells]);
   function navigate(next: string) { location.hash = next; setTab(next); }
-  function showCells() { setFocusCells(true); navigate('overview'); }
-  function showCellTrend(days: 7 | 30) {
-    setMetric('cell_delta_mv'); setHours(days * 24);
+  function showCells() { setFocusCells(true); navigate('battery'); }
+  useEffect(() => {
+    if (tab !== 'overview' || !focusTrend) return;
     const heading = document.getElementById('running-trend-heading');
     heading?.focus({ preventScroll: true });
     heading?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+    setFocusTrend(false);
+  }, [tab, focusTrend]);
+  function showCellTrend(days: 7 | 30) {
+    setMetric('cell_delta_mv'); setHours(days * 24); setFocusTrend(true); navigate('overview');
   }
   const [clock, setClock] = useState(Date.now());
   useEffect(() => {
@@ -238,14 +245,15 @@ function App() {
     <a className="skip-link" href="#main-content">跳到主要内容</a><aside className="sidebar"><a className="brand" href="#overview" aria-label="US3000 电力概览"><img className="brand-icon" src={logo} alt="" width="44" height="44" /><span className="brand-name">US3000<span className="brand-sub">电力监控</span></span></a>
       <div className="nav-caption">工作空间</div><nav aria-label="主导航">
         <button aria-current={tab === 'overview' ? 'page' : undefined} className={tab === 'overview' ? 'selected' : ''} onClick={() => navigate('overview')}><Activity size={18} />电力概览<ChevronRight size={15} /></button>
-        <button aria-current={tab === 'calibration' ? 'page' : undefined} className={tab === 'calibration' ? 'selected' : ''} onClick={() => navigate('calibration')}><SlidersHorizontal size={18} />功率校准</button>
-        <button aria-current={tab === 'diagnostics' ? 'page' : undefined} className={tab === 'diagnostics' ? 'selected' : ''} onClick={() => navigate('diagnostics')}><Cpu size={18} />诊断与说明</button>
-        <button aria-current={tab === 'hardware' ? 'page' : undefined} className={tab === 'hardware' ? 'selected' : ''} onClick={() => navigate('hardware')}><Database size={18} />硬件档案</button>
+        <button aria-current={tab === 'energy' ? 'page' : undefined} className={tab === 'energy' ? 'selected' : ''} onClick={() => navigate('energy')}><Zap size={18}/>用电分析</button>
+        <button aria-current={tab === 'battery' ? 'page' : undefined} className={tab === 'battery' ? 'selected' : ''} onClick={() => navigate('battery')}><BatteryCharging size={18}/>电池与供电</button>
+        <button aria-current={['calibration','diagnostics','hardware','updates'].includes(tab) ? 'page' : undefined} className={['calibration','diagnostics','hardware','updates'].includes(tab) ? 'selected' : ''} onClick={() => navigate('diagnostics')}><SlidersHorizontal size={18}/>设备管理</button>
       </nav>
       <div className="sidebar-bottom"><ShieldCheck size={20} /><strong>只读监控</strong><p>采集与面板独立运行<br/>UPS 保护由 NAS 管理</p><div className="device-tag">UGREEN · US3000</div></div>
     </aside>
     <main id="main-content" tabIndex={-1}><header><div className="breadcrumb">设备监控 <ChevronRight size={14} /><span>US3000</span></div><div className="header-status">{isBattery && <span className="header-battery"><AlertTriangle size={15}/>UPS 电池供电</span>}<span className={`dot ${fresh ? 'green' : 'amber'}`} />{fresh ? '实时采集' : apiError ? '连接中断' : view ? '等待数据' : '连接中'}<span className="header-clock">{new Date(clock).toLocaleTimeString('zh-CN', { hour12: false })}</span></div></header>
-      <div className="page-heading"><h1>{tab === 'overview' ? '电力概览' : tab === 'hardware' ? '硬件档案' : tab === 'calibration' ? '功率校准' : '诊断与说明'}</h1><div className="serial">USB 直连 · <span>{view?.device?.serial || 'US3000'}</span></div></div>
+      <div className="page-heading"><h1>{tab === 'overview' ? '电力概览' : tab === 'energy' ? '用电分析' : tab === 'battery' ? '电池与供电' : tab === 'updates' ? '版本与更新' : tab === 'hardware' ? '硬件档案' : tab === 'calibration' ? '功率校准' : '诊断与说明'}</h1><ThemePicker/><div className="serial">USB 直连 · <span>{view?.device?.serial || 'US3000'}</span></div></div>
+      {['calibration','diagnostics','hardware','updates'].includes(tab) && <nav className="management-nav range" aria-label="设备管理">{[['diagnostics','运行诊断'],['calibration','功率校准'],['updates','版本与更新'],['hardware','硬件档案']].map(([key,label]) => <button key={key} className={tab === key ? 'active' : ''} aria-current={tab === key ? 'page' : undefined} onClick={() => navigate(key)}>{label}</button>)}</nav>}
       {isBattery && <div className="power-alert" role="alert"><AlertTriangle size={23}/><div><strong>UPS 电池供电</strong><span>请检查外部电源</span></div>{Number.isFinite(currentSample?.soc) && <span className="power-alert-soc">当前电量 <strong>{num(currentSample?.soc, 0)}%</strong></span>}</div>}
       {cellWarning && <div className={`cell-alert ${cellPresentation.tone}`} role="status"><AlertTriangle size={22}/><div><strong>{cellPresentation.tone === 'check' ? '电芯压差建议检查' : '电芯压差偏大'} · {num(currentSample?.cell_delta_mv, 0)} mV</strong><span>待机观察参考</span></div><button type="button" onClick={showCells}>查看电芯<ChevronRight size={15}/></button></div>}
       {view?.source === 'replay' && <div className="notice">演示数据 · 用于功能预览，不代表 NAS 当前状态。</div>}
@@ -258,11 +266,12 @@ function App() {
           <div className="primary-readings">
             <div className="soc-reading"><div className="metric-label"><BatteryCharging size={16}/>电池电量</div><div className="metric-value">{num(currentSample?.soc, 0)}<span>%</span></div><div className="soc-track"><i style={{ width: currentSample && Number.isFinite(currentSample.soc) ? `${Math.max(0, Math.min(100, currentSample.soc))}%` : '0%' }}/></div><span className="muted">设备报告值</span></div>
             <Metric icon={<Zap size={16}/>} label={isBattery ? '电池放电功率 · 估算' : '交流输入功率 · 估算'} value={num(estimateIssue ? null : isBattery ? currentSample?.battery_energy_estimate_w : currentSample?.ac_input_estimate_w)} unit="W" note={estimateIssue ? '校准信息异常 · 功率估算暂停' : powerNote(currentSample, isBattery ? 'battery' : 'ac')}/>
-            <Metric icon={<BatteryCharging size={16}/>} label="电池组电压" value={num(currentSample?.battery_voltage, 3)} unit="V" note="额定电池能量 43.2 Wh"/>
+            <TodayMetrics/>
           </div>
           <div className="power-caption"><span>功率估算非 NAS 输出功率。<a href="#diagnostics">估算依据 ↗</a></span><a className="power-calibration-link" href="#calibration"><SlidersHorizontal size={14}/><span>{fresh ? '当前配置' : '最近配置'}：{calibrationLabel(s?.calibration_profile ?? view?.calibration_validation?.profile)} · 调整系数</span><ChevronRight size={14}/></a></div>
           <details className="telemetry-details"><summary>详细电压与充放电读数</summary>
           <dl className="telemetry-readings">
+            <div><dt>电池组电压 · 额定 43.2 Wh</dt><dd>{num(currentSample?.battery_voltage, 3)} <small>V</small></dd></div>
             <div><dt>适配器输入 · 直流侧</dt><dd>{num(currentSample?.input_voltage, 3)} <small>V</small></dd></div>
             <div><dt>UPS 输出电压</dt><dd>{num(currentSample?.output_voltage, 3)} <small>V</small></dd></div>
             <div><dt>电池充电电流 · 估算</dt><dd>{num(currentSample?.battery_charge_current_candidate_a, 3)} <small>A</small></dd></div>
@@ -271,26 +280,28 @@ function App() {
           </dl>
           <p className="telemetry-note">电流为设备换算值，尚无独立精度验证；放电功率校准不改变这里的电流。<a href="#diagnostics">数据说明 ↗</a></p></details>
         </section>
-        <section className="detail-grid"><article className="panel trend">
+        <section className="overview-trend"><article className="panel trend">
           <div className="panel-heading"><div><h3 id="running-trend-heading" tabIndex={-1}>运行趋势 <span>{unit}</span></h3><p>{metric === 'ac_input_estimate_w' ? '交流输入估算 · 电池供电期间留空' : metric === 'battery_energy_estimate_w' ? '电池端估算 · 外部供电期间留空' : metric === 'cell_delta_mv' ? '同时查看压差均值与峰值 · 中断时段留空' : '历史趋势 · 中断时段留空'}</p></div></div>
           <div className="range history-range" role="group" aria-label="趋势时间范围">{historyRanges.map(range => <button key={range.hours} type="button" title={range.title} aria-pressed={hours === range.hours} className={hours === range.hours ? 'active' : ''} onClick={() => setHours(range.hours)}>{range.label}</button>)}</div>
           <div className="chart-controls"><select aria-label="趋势指标" value={metric} onChange={e => setMetric(e.target.value)}><option value="ac_input_estimate_w">交流输入功率 · 估算</option><option value="adapter_input_voltage_v">适配器输入电压</option><option value="ups_output_voltage_v">UPS 输出电压</option><option value="battery_charge_power_candidate_w">电池充电功率 · 估算</option><option value="battery_energy_estimate_w">电池放电功率 · 估算</option><option value="soc">电量</option><option value="cells">四节电芯电压</option><option value="cell_delta_mv">电芯压差 · 均值与峰值</option></select><a href={`/api/export.csv?hours=${hours}`}><ArrowDownToLine size={14} />导出 CSV</a></div>
           {historyLoading ? <div className="chart-empty" role="status">正在加载历史记录…</div> : historyError ? <div className="chart-empty">历史查询暂不可用，将自动重试。</div> : history.points.some(p => metric === 'cells' ? ['cell_1', 'cell_2', 'cell_3', 'cell_4'].some(key => Number.isFinite(p.values[key])) : Number.isFinite(p.values[metric]) || (metric === 'cell_delta_mv' && Number.isFinite(p.max.cell_delta_mv))) ? <ChartBoundary><Suspense fallback={<div className="chart-empty" role="status">正在加载趋势图…</div>}><Chart history={history} metric={metric} unit={unit} /></Suspense></ChartBoundary> : <div className="chart-empty"><Activity size={28} /><span>所选时间内暂无该指标记录</span><small>有可用读数时将自动记录，未记录的时段不会补齐。</small></div>}
           {!historyLoading && !historyError && <details className="history-coverage"><summary>{historySummary(history)}</summary><p>{historyCoverage(history)}</p><p>{historyResolution(history.resolution_sec)}{metric === 'cell_delta_mv' ? '峰值是统计周期内实际记录的最大压差。' : ''}</p></details>}
         </article>
-        <CellBalanceCard sample={s} report={view?.cell_balance} fresh={!!fresh} trendHours={hours} trendMetric={metric} onTrend={showCellTrend} /></section>
-        <EnergyUsageCard />
-        <BatteryCapacityCard />
-        <section className="overview-records"><BatterySessionRecords days={sessionDays} onDaysChange={setSessionDays} />
         </section>
-        <EventTimeline />
-      </> : tab === 'calibration' ? <CalibrationSettings live={view} liveFresh={!!fresh} liveAge={age} /> : tab === 'hardware' ? <section className="hardware-page">
+        <OverviewBrief view={view} fresh={!!fresh} estimateIssue={estimateIssue}/>
+        <EventTimeline compact/>
+      </> : tab === 'energy' ? <EnergyUsageCard/> : tab === 'battery' ? <>
+        <CellBalanceCard sample={s} report={view?.cell_balance} fresh={!!fresh} trendHours={hours} trendMetric={metric} onTrend={showCellTrend}/>
+        <BatteryCapacityCard/>
+        <BatterySessionRecords days={sessionDays} onDaysChange={setSessionDays}/>
+        <EventTimeline/>
+      </> : tab === 'updates' ? <DiagnosticsPanel updates live={view} liveFresh={!!fresh}/> : tab === 'calibration' ? <CalibrationSettings live={view} liveFresh={!!fresh} liveAge={age} /> : tab === 'hardware' ? <section className="hardware-page">
         <article className="hardware-intro"><div><h2>US3000 直流 UPS</h2><p>电池管理负责储能监测，电源转换负责供电。</p></div><div className="hardware-rating"><strong>120<span>W</span></strong><span>额定最大输出</span></div></article>
         <div className="spec-strip"><div><strong>43.2 Wh</strong><span>整机标称电池能量</span></div><div><strong>4S · 3 Ah</strong><span>四节串联电池组</span></div><div><strong>12 V / 10 A</strong><span>额定电池输出</span></div><div><strong>约 439 g</strong><span>拆解样机重量</span></div></div>
         <article className="panel"><h3>供电结构</h3><div className="topology-row"><span>19 V 适配器</span><ChevronRight/><span>US3000 直通</span><ChevronRight/><span>NAS</span></div><div className="topology-row"><span>四串锂电池</span><ChevronRight/><span>12 V 稳压输出</span><ChevronRight/><span>NAS</span></div><p className="muted">以上电压路径来自本机切换记录；额定输出规格与市电直通电压分别列示。</p></article>
         <article className="panel"><h3>电池与结构</h3><dl>{[['电芯', 'SunPower INR18650-3000 × 4'], ['单节标称', '3.7 V · 3000 mAh'], ['整机电池标称', '14.4 V · 3000 mAh'], ['输入规格', '12 V / 10 A · 19 V / 7.9 A · 20 V / 7 A'], ['结构', '控制板与功率板分层，带独立温度探头']].map(([k,v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl><p className="muted">硬件资料来自拆解样机及产品规格，不代表已读取本机芯片型号。电芯标称电压合计与整机标称口径不同；43.2 Wh 不等同于实测可用能量。</p><div className="source-links"><a href="https://www.chongdiantou.com/archives/1749216234051.html" target="_blank" rel="noreferrer">充电头网拆解 ↗</a><a href="https://ai.ugreen.com/products/ugreen-nas-backup-power-120w-12000mah" target="_blank" rel="noreferrer">UGREEN 产品规格 ↗</a><a href="https://www.ti.com/product/TPS55289" target="_blank" rel="noreferrer">TI 器件资料 ↗</a></div></article>
         <article className="panel"><h3>核心器件</h3><div className="chip-list">{[['GD32F303RCT6', '整机控制', 'GigaDevice · Cortex-M4'], ['CBM8580KV6NT', '电池管理', 'Chipsea · 多串锂电池监测与保护'], ['TPS55289', '升降压转换', 'Texas Instruments · 同步升降压'], ['SC8002', '降压控制', 'Southchip · 同步降压控制器'], ['LM74610-Q1', '理想二极管控制', 'Texas Instruments · 电源路径控制']].map(([name,role,detail]) => <div key={name}><Cpu size={20}/><strong>{name}</strong><span>{role}</span><small>{detail}</small></div>)}</div></article>
-      </section> : <section className="diag-page"><DiagnosticsPanel/><details className="diag-legacy"><summary>功率估算与原始字段说明</summary><section className="diagnostic-grid"><article className="panel"><h3>数据来源与精度</h3><p>实时数据来自本机 UPS USB 遥测。电量、电压为设备报告值；功率和电池电流属于估算值。</p><h3>交流输入功率</h3><p>{calibrated ? localCalibration ? '已启用开发样机 19 V 适配器校准，包含回充补偿，采用 8 秒平滑。' : '已启用自定义系数，采用 8 秒平滑；自定义估算未经过独立验证。' : '当前尚未启用适用于此设备的功率校准。电量、电压和设备电流仍正常显示；功率主卡在配置校准后提供估算。'}面板运行不读取智能插座。</p><p>开源安装默认不套用其他设备的校准系数。可在<a href="#calibration">功率校准</a>中查看实际生效的系数，或依据本机测量调整自定义系数。</p>{localCalibration && <p>开发样机配置的非充电独立样本平均绝对误差约 1.4 W；充电时段后半段验证约 1.1 W，最大约 4.6 W。验证范围约 58–83 W，不代表全量程精度。更换适配器、固件或接线后需要重新校准。</p>}<p>开发样机配置超出已验证负载或充电电流范围时标注“仅供参考”；电池供电时不提供交流估算。电池侧功率与电流未经过独立直流仪表校准，不能视作 NAS 输出功率。</p><h3>电池供电功率</h3><p>电池放电功率表示电池端释放能量的速率，包含 UPS 转换损耗，与 NAS 输出功率不同。开发样机配置使用 43.2 Wh 标称能量及长放电电量趋势校准，并作 8 秒平滑；假设实际容量接近标称、SOC 近似能量比例。容量衰减可能使估算偏高，尚无独立仪表精度验证。</p><h3>放电能量记录</h3><p>逐次记录的 Wh 仅估算首末电池供电采样之间的电池端能量。使用相邻有效样本的未平滑放电原始功率乘以记录时的电池放电倍率积分；与主卡的 8 秒平滑功率显示不同。采样缺口不补算，覆盖率与供电会话是否完整分别标注。观测范围、校准依据不同的记录不汇总成范围总 Wh，也不反推满容量或健康百分比。</p><h3>电芯压差参考</h3><p>分级只在连续外部供电且电池未充电满 30 分钟后使用，当前参考区间还需持续 2 分钟才确认。充放电期间只展示工况和原始读数；中断后重新观察。阈值为参考值，未获厂家验证，压差不等于电池容量或健康度。</p><h3>历史与状态</h3><p>状态切换和数据中断分别记录。不同计算版本的历史分开存储；无数据时留空。设备未提供可用的续航与负载率，因此不展示。</p></article>
+      </section> : <section className="diag-page"><DiagnosticsPanel live={view} liveFresh={!!fresh}/><details className="diag-legacy"><summary>功率估算与原始字段说明</summary><section className="diagnostic-grid"><article className="panel"><h3>数据来源与精度</h3><p>实时数据来自本机 UPS USB 遥测。电量、电压为设备报告值；功率和电池电流属于估算值。</p><h3>交流输入功率</h3><p>{calibrated ? localCalibration ? '已启用开发样机 19 V 适配器校准，包含回充补偿，采用 8 秒平滑。' : '已启用自定义系数，采用 8 秒平滑；自定义估算未经过独立验证。' : '当前尚未启用适用于此设备的功率校准。电量、电压和设备电流仍正常显示；功率主卡在配置校准后提供估算。'}面板运行不读取智能插座。</p><p>开源安装默认不套用其他设备的校准系数。可在<a href="#calibration">功率校准</a>中查看实际生效的系数，或依据本机测量调整自定义系数。</p>{localCalibration && <p>开发样机配置的非充电独立样本平均绝对误差约 1.4 W；充电时段后半段验证约 1.1 W，最大约 4.6 W。验证范围约 58–83 W，不代表全量程精度。更换适配器、固件或接线后需要重新校准。</p>}<p>开发样机配置超出已验证负载或充电电流范围时标注“仅供参考”；电池供电时不提供交流估算。电池侧功率与电流未经过独立直流仪表校准，不能视作 NAS 输出功率。</p><h3>电池供电功率</h3><p>电池放电功率表示电池端释放能量的速率，包含 UPS 转换损耗，与 NAS 输出功率不同。开发样机配置使用 43.2 Wh 标称能量及长放电电量趋势校准，并作 8 秒平滑；假设实际容量接近标称、SOC 近似能量比例。容量衰减可能使估算偏高，尚无独立仪表精度验证。</p><h3>放电能量记录</h3><p>逐次记录的 Wh 仅估算首末电池供电采样之间的电池端能量。使用相邻有效样本的未平滑放电原始功率乘以记录时的电池放电倍率积分；与主卡的 8 秒平滑功率显示不同。采样缺口不补算，覆盖率与供电会话是否完整分别标注。观测范围、校准依据不同的记录不汇总成范围总 Wh，也不反推满容量或健康百分比。</p><h3>电芯压差参考</h3><p>分级只在连续外部供电且电池未充电满 30 分钟后使用，当前参考区间还需持续 2 分钟才确认。充放电期间只展示工况和原始读数；中断后重新观察。阈值为参考值，未获厂家验证，压差不等于电池容量或健康度。</p><h3>历史与状态</h3><p>状态切换和数据中断分别记录。不同计算版本的历史分开存储；无数据时留空。设备未提供可用的续航与负载率，因此不展示。</p></article>
       <article className="panel"><h3>连接与记录</h3><dl>{[['校准配置', calibrationLabel(s?.calibration_profile ?? view?.calibration_validation?.profile)], ['采集连接', fresh ? '正常' : '等待恢复'], ['历史存储', view ? view.storage_error || '正常' : '等待数据'], ['有效报文', view?.diagnostics?.frames ?? '—'], ['丢弃报文', view?.diagnostics?.dropped ?? '—'], ['系统 UPS 服务', nut?.fresh ? '已连接' : '暂不可用']].map(([k,v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl><p className="muted">监控采用只读采集。关机与电源保护由 NAS 系统管理。</p><details><summary>高级诊断</summary><p>输出电流原读数：{num(currentSample?.current,3)} A；输出功率原计算：{num(currentSample?.dc_power_estimate_w)} W。两者未完成测点及比例校准，不作为主要功耗指标。</p><p>充电电流使用字节 29–30，放电电流使用 31–32，按原值 ÷ 1000 计算；电池功率使用电池组电压。字节 20 不解释为总输入电流。</p><p>{calibrated && coefficients ? `最近报告的系数：交流基底 ${String(coefficients.base_gain)}，回充补偿 ${coefficients.charge_gain === null ? '未校准' : String(coefficients.charge_gain)}，电池放电 ${coefficients.battery_gain === null ? '未校准' : String(coefficients.battery_gain)}。` : '当前未报告已启用的校准系数。'}<a href="#calibration">查看系数与公式 ↗</a> 系数为经验参数，不是转换效率。</p><dl>{Object.entries(currentSample?.raw_fields?.be_u16 || {}).map(([k,v]) => <div key={k}><dt>字节 {k}–{Number(k)+1}</dt><dd>{v}</dd></div>)}</dl><h3>系统接口原值</h3><dl>{Object.entries(nut?.values || {}).map(([k,v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl></details>{s?.warnings?.map(w => <p className="notice" key={w}>{w}</p>)}</article></section></details></section>}
       <footer><span><ShieldCheck size={14} />面板不执行关机或 UPS 控制</span><span>US3000 Monitor · v{__APP_VERSION__}</span></footer>
     </main>

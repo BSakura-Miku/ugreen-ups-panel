@@ -40,34 +40,36 @@ function Note({ event, onSaved }: { event: Event; onSaved: () => void }) {
   return <details><summary>编辑备注</summary><form onSubmit={save}><label>事件备注<textarea maxLength={300} value={note} onChange={e => setNote(e.target.value)}/></label><button disabled={saving}>{saving ? '正在保存…' : '保存备注'}</button>{message && <p role="status">{message}</p>}</form></details>;
 }
 
-export default function EventTimeline() {
+export default function EventTimeline({ compact = false, window: range }: { compact?: boolean; window?: { start: number; end: number } }) {
   const [events, setEvents] = useState<Event[]>([]);
   const [error, setError] = useState('');
   const [kind, setKind] = useState('all');
-  const [limit, setLimit] = useState(5);
+  const [limit, setLimit] = useState(compact ? 3 : 5);
   const [selected, setSelected] = useState<string | null>(null);
+  useEffect(() => { setLimit(compact ? 3 : 5); setKind('all'); setSelected(null); }, [compact]);
   const [generation, refresh] = useState(0);
   useEffect(() => startVisiblePolling(async signal => {
     try {
-      const next = await readJson<Event[]>(`/api/timeline?limit=${limit}`, signal);
+      const next = await readJson<Event[]>(`/api/timeline?limit=${limit}${range ? `&start=${range.start}&end=${range.end}` : ''}`, signal);
       if (!Array.isArray(next)) throw new Error();
-      if (!signal.aborted) { setEvents(next); setError(''); }
+      if (!signal.aborted) { setEvents(range ? next.filter(event => { const stamp = event.occurred_at ?? event.observed_at; return stamp >= range.start && stamp <= range.end; }) : next); setError(''); }
     } catch { if (!signal.aborted) setError('事件查询暂不可用，已有内容为上次查询结果。'); }
-  }, () => 10000), [limit, generation]);
+  }, () => 10000), [limit, generation, range?.start, range?.end]);
   const visible = events.filter(event => kind === 'all' || event.kind === kind);
-  return <section className="panel event-timeline" aria-labelledby="timeline-heading">
-    <div className="panel-heading"><h3 id="timeline-heading">事件时间轴</h3><label>筛选 <select aria-label="事件类型" value={kind} onChange={e => setKind(e.target.value)}><option value="all">全部事件</option>{Object.entries(kinds).map(([key, value]) => <option key={key} value={key}>{value}</option>)}</select></label></div>
-    <p className="muted">串联供电、连接、系统状态与校准变化。新类型从本版本启用后开始记录，旧记录保留原有首次观察时间。</p>
+  const heading = range ? `timeline-${range.start}` : 'timeline-heading';
+  return <section className={`panel event-timeline ${range ? 'session-events' : ''}`} aria-labelledby={heading}>
+    <div className="panel-heading"><h3 id={heading}>{range ? '本次供电附近事件与备注' : '事件时间轴'}</h3>{!compact && <label>筛选 <select aria-label="事件类型" value={kind} onChange={e => setKind(e.target.value)}><option value="all">全部事件</option>{Object.entries(kinds).map(([key, value]) => <option key={key} value={key}>{value}</option>)}</select></label>}</div>
+    {!compact && <p className="muted">{range ? '显示本次记录前后一分钟内及期间的事件。时间相近不代表因果关系；发生时间未知时按首次观察时间筛选。' : '串联供电、连接、系统状态与校准变化。旧记录保留原有首次观察时间。'}</p>}
     {error && <p role="status">{error}</p>}
     <ol className="timeline-list">{visible.map(event => <li key={event.id}>
       <header><strong>{kinds[event.kind] || '状态事件'}</strong><time>{stamp(event.occurred_at ?? event.observed_at)}</time></header>
       <p>{event.detail === 'offline' ? '采集数据离线' : event.detail.startsWith('online:') ? `已连接 · ${modes[event.detail.split(':')[1]] || '状态更新'}` : event.detail}</p>
-      <p className="muted">来源：{sources[event.source] || '观察记录'} · 首次观察 {stamp(event.observed_at)}{event.occurred_at === null ? '；发生时间未知' : `；发生时间 ${stamp(event.occurred_at)}`}</p>
+      {!compact && <p className="muted">来源：{sources[event.source] || '观察记录'} · 首次观察 {stamp(event.observed_at)}{event.occurred_at === null ? '；发生时间未知' : `；发生时间 ${stamp(event.occurred_at)}`}</p>}
       {event.note && <p>备注：{event.note}</p>}
-      <div className="timeline-actions"><button aria-expanded={selected === event.id} onClick={() => setSelected(selected === event.id ? null : event.id)}>{selected === event.id ? '收起趋势' : '查看附近趋势'}</button><Note event={event} onSaved={() => refresh(v => v + 1)}/></div>
+      {!compact && <div className="timeline-actions"><button aria-expanded={selected === event.id} onClick={() => setSelected(selected === event.id ? null : event.id)}>{selected === event.id ? '收起趋势' : '查看附近趋势'}</button><Note event={event} onSaved={() => refresh(v => v + 1)}/></div>}
       {selected === event.id && <NearbyTrend key={event.id} event={event}/>}
     </li>)}</ol>
     {!visible.length && <p className="muted">当前范围内暂无此类事件。</p>}
-    {limit < 100 && <button onClick={() => setLimit(limit < 20 ? 20 : 100)}>查看更多（最多 100 条）</button>}
+    {compact && <a href="#battery">查看全部事件与供电记录 →</a>}{!compact && limit < 100 && <button onClick={() => setLimit(limit < 20 ? 20 : 100)}>查看更多（最多 100 条）</button>}
   </section>;
 }

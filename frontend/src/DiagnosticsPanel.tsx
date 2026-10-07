@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, ArrowDownToLine, Cable, Cpu, Info, Radio } from 'lucide-react';
-import type { DiagnosticBuild, DiagnosticCheck, DiagnosticView, RawObservationPoint } from './types';
+import type { DiagnosticBuild, DiagnosticCheck, DiagnosticView, LiveView, RawObservationPoint } from './types';
 import { buildRawTrace, diagnosticCount, diagnosticTime, diagnosticVersion, rawChannelLabel, runtimeObservation } from './diagnosticDisplay';
 import CollectorUpdatePanel from './CollectorUpdatePanel';
+import { calibrationEstimateIssue, calibrationLabel } from './calibrationState';
 import { readJson, startVisiblePolling } from './readPolling';
 import { mergeObservation } from './observationStream';
 import type { ObservationStream } from './observationStream';
@@ -67,7 +68,8 @@ function RawTrend({ points }: { points: RawObservationPoint[] }) {
   </>}</div>;
 }
 
-function DiagnosticsContent() {
+type Props = { updates?: boolean; live?: LiveView | null; liveFresh?: boolean };
+function DiagnosticsContent({ updates = false, live, liveFresh = false }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [stream, setStream] = useState<ObservationStream | null>(null);
   const [streamError, setStreamError] = useState('');
@@ -140,12 +142,18 @@ function DiagnosticsContent() {
     } finally { clearTimeout(timeout); setDownloading(null); }
   }
 
+  if (updates) return <section className="diag-content"><article className="panel"><h3>当前版本</h3><dl className="diag-values"><div><dt>面板</dt><dd><BuildValue build={versions?.panel}/></dd></div><div><dt>采集器</dt><dd><BuildValue build={versions?.collector}/></dd></div></dl>{error && <p role="status">{error}</p>}</article><CollectorUpdatePanel fallbackCurrent={versions?.collector} diagnosticsFresh={responseFresh} captureFresh={data?.capture_fresh === true && sampleAge <= 10} checks={connection?.checks}/></section>;
   return <div className="diag-content">
+    <section className="management-summary" aria-label="运行状态摘要">{[
+      ['采集', liveFresh ? '实时连接' : '等待恢复', liveFresh ? 'USB 遥测持续更新' : '实时读数隐藏，检查下方连接项'],
+      ['历史存储', live ? live.storage_error ? '写入异常' : '正常' : '读取中', live?.storage_error ? '累计可能缺失，请检查存储空间与权限' : '按实际采样保存'],
+      ['功率校准', calibrationEstimateIssue(live ?? null) ? '需处理' : calibrationLabel(live?.sample?.calibration_profile), calibrationEstimateIssue(live ?? null) || '查看或调整设备实际使用的系数'],
+    ].map(([label, status, detail]) => <article className="panel" key={label}><h3>{label}</h3><strong>{status}</strong><p className="muted">{detail}</p></article>)}<article className="panel"><h3>软件更新</h3><p>面板与采集器独立维护</p><a href="#updates">查看版本与更新状态 →</a></article></section>
     <div className="diag-intro"><p>查看采集链路、系统上报与原始观测，便于核对版本和排查连接。</p><span>{data ? `最近查询 ${diagnosticTime(data.generated_at)}` : '正在读取诊断信息…'}</span></div>
     {error && <div className="notice diag-error" role="status">{error} 当前诊断读数已隐藏。</div>}
     {!error && data && !responseFresh && <div className="notice" role="status">诊断查询未及时更新，当前读数已隐藏。</div>}
     <div className="diag-top-grid">
-      <div className="update-version-stack"><article className="panel diag-card" aria-labelledby="diag-versions-heading">
+      <div className="update-version-stack"><details className="panel diag-card" aria-labelledby="diag-versions-heading"><summary>版本与设备字段</summary>
         <h3 id="diag-versions-heading"><Cpu size={18}/>版本信息</h3>
         <dl className="diag-values">
           <div><dt>面板</dt><dd><BuildValue build={versions?.panel}/></dd></div>
@@ -158,13 +166,13 @@ function DiagnosticsContent() {
           <div><dt>解码版本</dt><dd>{diagnosticCount(versions?.decoder_version)}</dd></div>
         </dl>
         <p className="diag-note">USB 描述符版本与 UPS 固件版本是不同字段；例如 1.00 不能据此解释成固件 V3.3。旧采集器未提供的信息显示为未知。</p>
-      </article><CollectorUpdatePanel fallbackCurrent={versions?.collector} diagnosticsFresh={responseFresh} captureFresh={data?.capture_fresh === true && sampleAge <= 10} checks={connection?.checks}/></div>
+      </details><a href="#updates">检查版本与更新 →</a></div>
       <article className="panel diag-card" aria-labelledby="diag-connection-heading">
         <h3 id="diag-connection-heading"><Cable size={18}/>连接检查</h3>
         <p className="diag-note">逐项显示已观测到的连接条件；检查通过不代表电池或设备健康。</p>
         {connection?.checks.length ? <ul className="diag-checks">{connection.checks.map((check, index) => {
           const status = responseFresh && Object.hasOwn(checkLabels, check.status) ? check.status : 'unknown';
-          return <li key={`${check.id}-${index}`}><details className="diag-check-detail"><summary><strong>{check.label}</strong><span className={`diag-status diag-status-${status}`}>{checkLabels[status]}</span></summary><p>{responseFresh ? check.detail : '等待更新诊断结果。'}</p></details>{(status === 'warning' || status === 'error') && <p className="diag-check-warning">{check.detail}</p>}</li>;
+          return <li key={`${check.id}-${index}`}><details className="diag-check-detail" open={status === 'warning' || status === 'error'}><summary><strong>{check.label}</strong><span className={`diag-status diag-status-${status}`}>{checkLabels[status]}</span></summary><p>{responseFresh ? check.detail : '等待更新诊断结果。'}</p></details>{(status === 'warning' || status === 'error') && <p className="diag-check-warning">{check.detail}</p>}</li>;
         })}</ul> : <p className="diag-empty">等待采集器连接信息。</p>}
         <dl className="diag-values diag-connection-meta">
           <div><dt>USB 数据时间</dt><dd>{responseFresh && finite(connection?.usb_age_sec) ? elapsedLabel(connection.usb_age_sec + sinceResponse) : '未知'}</dd></div>
@@ -175,7 +183,7 @@ function DiagnosticsContent() {
         {!!counters.length && <details className="diag-details"><summary>采集计数</summary><dl className="diag-values">{counters.map(([key, value]) => <div key={key}><dt>{counterLabels[key] || key}</dt><dd>{diagnosticCount(value)}</dd></div>)}</dl></details>}
       </article>
     </div>
-    <article className="panel diag-card" aria-labelledby="diag-system-heading">
+    <details className="panel diag-card" aria-labelledby="diag-system-heading"><summary>NAS 系统状态与原始字段</summary>
       <div className="diag-heading"><h3 id="diag-system-heading"><Radio size={18}/>NAS 系统上报</h3><span className={`diag-status ${systemFresh ? 'diag-status-info' : 'diag-status-unknown'}`}>{systemFresh ? '查询有效 · 独立来源' : '当前系统信息不可用'}</span></div>
       <p className="diag-note">以下来自系统 UPS 服务。与 USB 遥测是否属于同一台设备，以连接检查的身份结果为准。</p>
       <div className="diag-system-grid">
@@ -188,7 +196,7 @@ function DiagnosticsContent() {
       </div>
       <div className="diag-alarm"><span>系统告警原文</span><p>{systemFresh ? system?.alarm_text || '当前查询未提供告警原文。' : '当前系统查询不可用。'}</p></div>
       {!!systemValues.length && <details className="diag-details"><summary>查看系统字段原值{!systemFresh ? '（最近一次查询，非当前值）' : ''}</summary><dl className="diag-values diag-system-raw">{systemValues.map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl></details>}
-    </article>
+    </details>
     <details className="panel diag-card diag-observation" aria-labelledby="diag-observation-heading" onToggle={event => setExpanded(event.currentTarget.open)}>
       <summary><span id="diag-observation-heading"><Activity size={18}/>原始通道短时观测</span><span className="diag-summary-note">疑似温度，未验证</span></summary>
       <p className="diag-note">通道 A / B 分别是从 0 开始计数的单字节 26 / 27。物理量、单位和测点均未确认，不能当作电池温度、板温或温度探头。</p>
@@ -209,6 +217,6 @@ function DiagnosticsContent() {
   </div>;
 }
 
-export default function DiagnosticsPanel() {
-  return <DiagnosticsBoundary><DiagnosticsContent/></DiagnosticsBoundary>;
+export default function DiagnosticsPanel(props: Props) {
+  return <DiagnosticsBoundary><DiagnosticsContent {...props}/></DiagnosticsBoundary>;
 }

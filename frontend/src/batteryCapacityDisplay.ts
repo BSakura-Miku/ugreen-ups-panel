@@ -106,7 +106,7 @@ const reasonLabels: Record<string, string> = {
   waiting_external: '本次放电已记录，等待后续独立放电周期。',
   waiting_start: '等待后续经过 90%→80% 的连续放电记录。',
   short_window: '本轮区间持续时间过短，未计入可比较记录。',
-  not_observed: '新的采样正在处理，稍后更新本轮观察进度。',
+  not_observed: '等待自然发生的连续放电，完整经过 90%→80% 后更新观察。',
 };
 
 export function capacityReasonLabel(reason: string | null | undefined): string | null {

@@ -18,7 +18,7 @@ def tariffs(db):
         'SELECT effective_date, rate_micros / 1000000.0, currency FROM energy_tariffs ORDER BY effective_date')]
 
 
-def add_tariff(db, value, now):
+def validate_tariff(value):
     if not isinstance(value, dict) or set(value) != {'effective_date', 'rate', 'currency'}:
         raise ValueError('请填写生效日期、单一电价和币种。')
     try:
@@ -33,13 +33,41 @@ def add_tariff(db, value, now):
             raise ValueError()
     except (ValueError, TypeError, InvalidOperation):
         raise ValueError('电价应为 0–10000、最多六位小数，币种使用三个大写字母。') from None
+    return day.isoformat(), int(rate * 1000000), currency
+
+
+def add_tariff(db, value, now):
+    day_text, micros, currency = validate_tariff(value)
+    day = date.fromisoformat(day_text)
     existing = tariffs(db)
     if len(existing) >= 1000:
         raise ValueError('电价记录已达上限。')
     if existing and (day < datetime.fromtimestamp(now, TZ).date() or value['effective_date'] <= existing[-1]['effective_date']):
         raise ValueError('已有电价保留不变；新电价须从今天或未来、且晚于最后一条记录的日期生效。')
-    db.execute('INSERT INTO energy_tariffs VALUES(?,?,?,?)', (day.isoformat(), int(rate * 1000000), currency, now))
+    db.execute('INSERT INTO energy_tariffs VALUES(?,?,?,?)', (day_text, micros, currency, now))
     return tariffs(db)
+
+
+def replace_tariffs(db, value, now):
+    if not isinstance(value, dict) or set(value) != {'expected', 'tariffs'} or not isinstance(value['expected'], list) or not isinstance(value['tariffs'], list) or max(len(value['expected']), len(value['tariffs'])) > 1000:
+        raise ValueError('电价设置格式无效。')
+    rows = [validate_tariff(item) for item in value['tariffs']]
+    if len({row[0] for row in rows}) != len(rows):
+        raise ValueError('同一生效日期只能保留一条电价，请修改已有记录。')
+    db.execute('BEGIN IMMEDIATE')
+    if tariffs(db) != value['expected']:
+        raise ValueError('电价已在其他页面修改，请刷新后重新操作。')
+    db.execute('DELETE FROM energy_tariffs')
+    db.executemany('INSERT INTO energy_tariffs VALUES(?,?,?,?)', [(*row, now) for row in sorted(rows)])
+    return tariffs(db)
+
+
+def day_cost(day, prices):
+    price = next((item for item in reversed(prices) if item['effective_date'] <= day['date']), None)
+    amount = day['estimate_kwh']
+    return {'date': day['date'], 'estimate_cost': amount * price['rate'] if amount is not None and price else None,
+            'currency': price['currency'] if price else None, 'rate': price['rate'] if price else None,
+            'coverage_ratio': day['coverage_ratio']}
 
 
 def period(usage, db, start, end, now):
@@ -77,13 +105,10 @@ def analysis(usage, db, month, now):
     monthly = usage.month(db, first.strftime('%Y-%m'), now)
     costs, missing = [], 0.0
     for day in monthly['days']:
-        price = next((item for item in reversed(prices) if item['effective_date'] <= day['date']), None)
-        amount = day['estimate_kwh']
-        cost = amount * price['rate'] if amount is not None and price else None
-        if amount is not None and not price:
-            missing += amount
-        costs.append({'date': day['date'], 'estimate_cost': cost, 'currency': price['currency'] if price else None,
-                      'rate': price['rate'] if price else None, 'coverage_ratio': day['coverage_ratio']})
+        item = day_cost(day, prices)
+        if day['estimate_kwh'] is not None and item['rate'] is None:
+            missing += day['estimate_kwh']
+        costs.append(item)
     totals = {}
     for item in costs:
         if item['estimate_cost'] is not None:

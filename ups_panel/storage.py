@@ -274,6 +274,7 @@ class Store:
         view = view() if callable(view) else view
         with self.connect() as db:
             result = self.energy_usage.day(db, date, now=view['server_time'])
+            result['cost'] = usage_analysis.day_cost(result['day'], usage_analysis.tariffs(db))
         result['capture_fresh'] = bool(view.get('fresh'))
         return result
 
@@ -370,9 +371,14 @@ class Store:
             return usage_analysis.add_tariff(db, value, time.time() if now is None else now)
 
     @synchronized
-    def timeline(self, limit=100):
+    def replace_tariffs(self, value, now=None):
         with self.connect() as db:
-            return timeline.events(db, limit)
+            return usage_analysis.replace_tariffs(db, value, time.time() if now is None else now)
+
+    @synchronized
+    def timeline(self, limit=100, start=None, end=None):
+        with self.connect() as db:
+            return timeline.events(db, limit, start, end)
 
     @synchronized
     def event_note(self, event_id, note):

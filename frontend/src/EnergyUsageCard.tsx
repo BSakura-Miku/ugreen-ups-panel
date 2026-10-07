@@ -59,10 +59,13 @@ function DayDetail({ date, data, state, currentDate }: { date: string | null; da
       : !date ? <p className="energy-detail-placeholder">选择日期查看已记录电量与小时功率。</p>
       : <>
         <div className="energy-day-totals"><div><span>已记录累计</span><strong>{loading ? <LoadingNumber/> : energyKwh(day?.estimate_kwh)}<small>kWh</small></strong></div>
-          <div><span>平均输入功率</span><strong>{loading ? <LoadingNumber/> : energyPower(day?.average_power_w)}<small>W</small></strong></div></div>
+          <div><span>平均输入功率</span><strong>{loading ? <LoadingNumber/> : energyPower(day?.average_power_w)}<small>W</small></strong></div>
+          <div><span>当日电费 · 估算</span><strong>{loading ? <LoadingNumber/> : energyKwh(data?.cost?.estimate_cost, 2)}<small>{data?.cost?.currency === 'CNY' ? '元' : data?.cost?.currency ?? '—'}</small></strong></div></div>
+        {!loading && <p className="energy-detail-note">{data?.cost?.rate == null ? '未设置对应电价，可在「费用估算」中设置。' : `电价 ${data.cost.rate} ${data.cost.currency === 'CNY' ? '元' : data.cost.currency} / kWh；仅计已记录电量，缺采时段不补算。`}</p>}
         <div className="energy-day-coverage"><div><span>记录覆盖率</span><strong>{loading ? '读取中…' : energyCoverage(day?.coverage_ratio)}</strong></div>
           <progress max={1} value={day?.coverage_ratio ?? 0} aria-label="所选日期已过去时段的记录覆盖率"/>
           <p>{loading ? '正在读取覆盖时长' : <>已记录 {energyDuration(day?.covered_sec)} / {date === (data?.current_date ?? currentDate) ? '已过去' : '应记录'} {energyDuration(day?.expected_sec)}</>}</p></div>
+        {data && <details className="coverage-detail"><summary>查看记录缺口与原因</summary><p>以下为存在缺口的小时，不能据此定位到精确秒。电池供电期间市电输入记为 0，仍属于有效覆盖。</p><ul>{data.hours.filter(hour => hour.expected_sec - hour.covered_sec > 5).map(hour => <li key={hour.hour}>{String(hour.hour).padStart(2, '0')}:00–{String(hour.hour + 1).padStart(2, '0')}:00 · 未覆盖 {energyDuration(Math.max(0, hour.expected_sec - hour.covered_sec))}</li>)}</ul>{!data.hours.some(hour => hour.expected_sec - hour.covered_sec > 5) && <p>没有超过 5 秒缺口的小时。</p>}<p>缺口可能来自记录启用前、采集中断或功率估算条件不满足；当前汇总未保留逐段原因，可结合供电与事件记录核查。</p><a href="#battery">查看供电与事件记录 →</a></details>}
         {recordingIssue && <p className="energy-detail-note">记录存在异常，累计仅含已记录区间。</p>}
         {!!day && day.basis_count > 1 && <p className="energy-detail-note"><span className="energy-segment-badge">分段估算</span>各段按当时生效的校准累计，旧记录不重算。</p>}
         {loading ? <div className="energy-chart-loading" aria-hidden="true"><span className="energy-skeleton"/><span className="energy-skeleton"/><span className="energy-skeleton"/><span className="energy-skeleton"/></div>
@@ -167,7 +170,7 @@ export default function EnergyUsageCard() {
     <dl className="energy-summaries" aria-busy={monthLoading}>
       <div><dt>今日累计</dt><dd>{monthLoading ? <LoadingNumber/> : energyKwh(report?.today.estimate_kwh)}<small>kWh</small></dd><p>{report && !report.capture_fresh ? '已记录 · 采集离线' : '已记录 · 截至当前'}</p></div>
       <div><dt>所选月累计</dt><dd>{monthLoading ? <LoadingNumber/> : energyKwh(report?.summary.estimate_kwh)}<small>kWh</small></dd><p>{report ? `已记录 ${report.summary.recorded_days} 天` : '已记录累计'}{(report?.summary.basis_count ?? 0) > 1 && <span className="energy-segment-badge">分段估算</span>}</p></div>
-      <div><dt>完整记录日均</dt><dd>{monthLoading ? <LoadingNumber/> : energyKwh(report?.summary.complete_day_average_kwh)}<small>kWh</small></dd><p>{report?.summary.complete_days ? `${report.summary.complete_days} 个已结束完整日` : '暂无完整日'}</p></div>
+      <div><dt>所选月记录覆盖</dt><dd>{monthLoading ? <LoadingNumber/> : energyCoverage(report?.summary.coverage_ratio)}</dd><p>缺失时段不补算</p></div>
     </dl>
     <div className="energy-view-toolbar">
         <div className="energy-month-navigation"><h4 id="energy-month-heading">{energyMonthLabel(month)}</h4><div className="energy-month-buttons">
@@ -204,7 +207,7 @@ export default function EnergyUsageCard() {
       {report?.tracking_started_at && <span>开始记录于 {energyTimestamp(report.tracking_started_at, report.timezone)}</span>}</div>
     <details className="energy-method"><summary>统计口径 <ChevronDown size={14}/></summary>
       <p>按{report?.timezone === 'Asia/Shanghai' || !report ? '北京时间（UTC+8）' : `${report.timezone}（UTC${report.utc_offset}）`}自然日累计市电输入估算。电池放电能量不加入；连续确认的电池供电时段，市电输入记为 0。未覆盖时段保留空缺，不补算。</p>
-      <p>今日只统计截至当前的已记录部分；所选月合计包含该月已记录区间。完整记录日均只使用已结束、全天缺口不超过 5 秒的日期，当前日与部分记录日不加入日均。记录启用前的时段也计入覆盖率的缺口。</p>
+      <p>{report?.summary.complete_days ? `完整记录日均 ${energyKwh(report.summary.complete_day_average_kwh)} kWh，来自 ${report.summary.complete_days} 天。` : '暂无完整记录日，暂不计算完整日均。'}</p><p>今日只统计截至当前的已记录部分；所选月合计包含该月已记录区间。完整记录日均只使用已结束、全天缺口不超过 5 秒的日期，当前日与部分记录日不加入日均。记录启用前的时段也计入覆盖率的缺口。</p>
       <p>不同设备、数据来源或校准依据分别记录，显示为「分段估算」；各段按当时生效的校准累计，不用新系数重算旧记录。统计从启用后开始积累，不回填旧历史。</p>
     </details>
   </article>;

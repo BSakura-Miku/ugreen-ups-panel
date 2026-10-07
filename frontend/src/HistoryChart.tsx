@@ -1,11 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as echarts from 'echarts/core';
-import { LineChart } from 'echarts/charts';
+import { LineChart, ScatterChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import type { History, Point } from './types';
 
-echarts.use([LineChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
+echarts.use([LineChart, ScatterChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
 
 const labels: Record<string, string> = {
   battery_energy_estimate_w: '电池放电功率 · 估算',
@@ -41,8 +41,8 @@ type HistoryLine = { key: string; name: string; statistic: 'mean' | 'peak'; colo
 export function buildHistoryLines(history: History, metric: string): HistoryLine[] {
   const keys = metric === 'cells' ? ['cell_1', 'cell_2', 'cell_3', 'cell_4'] : [metric];
   const definitions: Omit<HistoryLine, 'data'>[] = metric === 'cell_delta_mv'
-    ? [{ key: metric, name: '压差均值', statistic: 'mean', color: '#b6ee74' }, { key: metric, name: '压差峰值', statistic: 'peak', color: '#efb673' }]
-    : keys.map((key, index) => ({ key, name: `${labels[key]} · 均值`, statistic: 'mean', color: ['#b6ee74', '#80bdff', '#d8a9f7', '#efb673'][index] }));
+    ? [{ key: metric, name: '压差均值', statistic: 'mean', color: '#4aa3ef' }, { key: metric, name: '压差峰值', statistic: 'peak', color: '#efb673' }]
+    : keys.map((key, index) => ({ key, name: `${labels[key]} · 均值`, statistic: 'mean', color: ['#4aa3ef', '#63bfab', '#d8a9f7', '#efb673'][index] }));
   const points = [...history.points].filter(point => isNumber(firstSample(point)))
     .sort((a, b) => firstSample(a) - firstSample(b));
   // A long aggregation window must not turn a known multi-minute outage
@@ -77,7 +77,8 @@ function statisticValue(value: unknown, unit: string) {
 
 export function historyTooltip(raw: unknown, history: History, unit: string) {
   const entries = (Array.isArray(raw) ? raw : [raw]) as { data?: HistoryDatum; seriesName?: string }[];
-  const visible = entries.filter(entry => entry.data?.point && isNumber(entry.data.value[1]));
+  const visible = entries.filter(entry => entry.data?.point && isNumber(entry.data.value[1]))
+    .filter((entry, index, all) => all.findIndex(other => other.data?.key === entry.data?.key && other.data?.statistic === entry.data?.statistic) === index);
   const point = visible[0]?.data?.point;
   if (!point) return '';
   const daily = history.resolution_sec >= 86400;
@@ -105,6 +106,8 @@ export function historyTooltip(raw: unknown, history: History, unit: string) {
 }
 
 export default function HistoryChart({ history, metric, unit }: { history: History; metric: string; unit: string }) {
+  const [light, setLight] = useState(document.documentElement.dataset.theme === 'light');
+  useEffect(() => { const update = () => setLight(document.documentElement.dataset.theme === 'light'); window.addEventListener('ups-theme-change', update); return () => window.removeEventListener('ups-theme-change', update); }, []);
   const container = useRef<HTMLDivElement>(null);
   const instance = useRef<echarts.EChartsType | null>(null);
 
@@ -124,34 +127,39 @@ export default function HistoryChart({ history, metric, unit }: { history: Histo
     instance.current.setOption({
       backgroundColor: 'transparent', useUTC: daily,
       tooltip: {
-        trigger: 'axis', renderMode: 'richText', backgroundColor: '#222b2b', borderColor: '#3b4744',
-        textStyle: { color: '#eef3ed', fontSize: 12, lineHeight: 18 }, confine: true,
+        trigger: 'axis', renderMode: 'richText', backgroundColor: light ? '#ffffff' : '#22262b', borderColor: '#3b4744',
+        textStyle: { color: light ? '#202830' : '#eef3ed', fontSize: 12, lineHeight: 18 }, confine: true,
         formatter: (raw: unknown) => historyTooltip(raw, history, unit),
       },
-      legend: { show: metric === 'cells' || metric === 'cell_delta_mv', top: 0, left: 'center', textStyle: { color: '#a9b5ac', fontSize: 12 }, itemWidth: 18, itemGap: 12 },
+      legend: { data: lines.map(line => line.name), show: metric === 'cells' || metric === 'cell_delta_mv', top: 0, left: 'center', textStyle: { color: light ? '#52616f' : '#a9b5ac', fontSize: 12 }, itemWidth: 18, itemGap: 12 },
       grid: { top: metric === 'cells' ? 58 : 38, left: 46, right: 18, bottom: 35 },
       xAxis: {
         type: 'time', min: isNumber(history.requested_start) ? history.requested_start * 1000 : undefined,
         max: isNumber(history.requested_end) ? history.requested_end * 1000 : undefined,
         axisLine: { lineStyle: { color: '#343e3a' } },
         axisLabel: {
-          color: '#a5b2ab', hideOverlap: true, fontSize: 12,
+          color: light ? '#52616f' : '#a5b2ab', hideOverlap: true, fontSize: 12,
           ...(daily ? { formatter: (value: number) => new Date(value).toISOString().slice(0, 10) } : {}),
         }, splitLine: { show: false }, splitNumber: 4,
       },
       yAxis: {
         type: 'value', scale: metric === 'cells', max: metric === 'soc' ? 100 : undefined,
-        axisLabel: { color: '#a5b2ab' },
-        splitLine: { lineStyle: { color: '#2b3531', type: 'dashed' } },
+        axisLabel: { color: light ? '#52616f' : '#a5b2ab' },
+        splitLine: { lineStyle: { color: light ? '#e0e5e8' : '#30363b', type: 'dashed' } },
       },
-      series: lines.map(line => ({
-        name: line.name, type: 'line', data: line.data, showSymbol: true, symbolSize: 4,
+      series: lines.flatMap(line => [{
+        name: line.name, type: 'line', data: line.data, showSymbol: false, symbolSize: 5,
         connectNulls: false, smooth: false, itemStyle: { color: line.color },
         lineStyle: { width: line.statistic === 'peak' ? 1.75 : 2, type: line.statistic === 'peak' ? 'dashed' : 'solid', color: line.color },
         areaStyle: lines.length === 1 ? { opacity: .07, color: line.color } : undefined,
-      })), animation: false,
+      }, {
+        // Preserve isolated observations that cannot form a line across a gap.
+        name: line.name, type: 'scatter', symbolSize: 4, itemStyle: { color: line.color },
+        data: line.data.filter((point, index, data) => isNumber(point.value[1])
+          && !isNumber(data[index - 1]?.value[1]) && !isNumber(data[index + 1]?.value[1])),
+      }]), animation: false,
     }, { notMerge: true, lazyUpdate: true });
-  }, [history, metric, unit]);
+  }, [history, metric, unit, light]);
 
   const values = history.points.flatMap(point => metric === 'cells'
     ? ['cell_1', 'cell_2', 'cell_3', 'cell_4'].map(key => point.values[key])

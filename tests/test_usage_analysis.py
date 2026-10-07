@@ -14,7 +14,7 @@ from ups_panel import timeline
 
 def hour(db, start, wh=100, coverage=3600, basis='one'):
     db.execute('INSERT INTO energy_usage_hours VALUES(?,?,?,?,?,?,?,?)',
-               (start, basis, '{}', wh, coverage, start, start + coverage, max(1, int(coverage / 2))))
+               (start, basis, json.dumps({'profile': None, 'revision': None, 'source': 'replay', 'ac_model': None}), wh, coverage, start, start + coverage, max(1, int(coverage / 2))))
 
 
 def test_comparison_uses_complete_matching_hours_and_never_scales_partial_bucket(tmp_path):
@@ -98,7 +98,74 @@ def test_settings_http_rejects_cross_origin_and_overlarge_bodies(tmp_path):
         assert client.post(route, content=' ' * 4097, headers={'X-UPS-Settings':'1','Content-Type':'application/json'}).status_code == 413
         assert client.post(route, json=body, headers={'X-UPS-Settings':'1'}).status_code == 200
         assert client.get('/api/energy-usage/analysis?month=2026-09').status_code == 200
+        replacement = {'expected': client.get('/api/energy-usage/analysis').json()['tariffs'], 'tariffs': []}
+        assert client.put(route, json=replacement).status_code == 403
+        assert client.put(route, json=replacement, headers={'X-UPS-Settings':'1', 'Origin':'https://evil.invalid'}).status_code == 403
+        assert client.put(route, json=replacement, headers={'X-UPS-Settings':'1'}).status_code == 200
+        assert client.get('/api/energy-usage/analysis').json()['tariffs'] == []
         result = client.get('/api/timeline').json()
         event = next(item for item in result if item['kind'] == 'application')
         assert client.put('/api/timeline/' + event['id'] + '/note', json={'note':'测试'}, headers={'X-UPS-Settings':'1'}).status_code == 200
         assert client.get('/api/history?hours=2&end=100').status_code == 200
+        stamp = event['occurred_at'] or event['observed_at']
+        scoped = client.get(f'/api/timeline?start={stamp - 1}&end={stamp + 1}').json()
+        assert any(row['id'] == event['id'] and row['note'] == '测试' for row in scoped)
+        assert client.get('/api/timeline?start=1').status_code == 422
+        assert client.get('/api/timeline?start=nan&end=100').status_code == 422
+        assert client.get('/api/timeline?start=0&end=100').json() == []
+
+
+def test_tariff_corrections_reprice_past_days_without_changing_energy(tmp_path):
+    store = Store(tmp_path / 'history.sqlite')
+    start = _start(date(2026, 9, 10)); now = start + 4 * 86400
+    with store.connect() as db:
+        for offset in range(3):
+            hour(db, start + offset * 86400, wh=1000)
+        original = list(db.execute('SELECT * FROM energy_usage_hours'))
+    prices = store.replace_tariffs({'expected': [], 'tariffs': [{'effective_date': '2026-09-10', 'rate': 2, 'currency': 'CNY'}]}, now=now)
+    assert store.usage_analysis(now=now)['cost_totals'] == {'CNY': 6}
+    corrected = [{'effective_date': '2026-09-10', 'rate': .5, 'currency': 'CNY'}, {'effective_date': '2026-09-12', 'rate': 1, 'currency': 'USD'}]
+    prices = store.replace_tariffs({'expected': prices, 'tariffs': corrected}, now=now)
+    assert store.usage_analysis(now=now)['cost_totals'] == {'CNY': 1, 'USD': 1}
+    day = store.usage_day('2026-09-11', {'server_time': now, 'fresh': True})
+    assert day['cost']['estimate_cost'] == .5
+    prices = store.replace_tariffs({'expected': prices, 'tariffs': prices[:1]}, now=now)
+    assert store.usage_analysis(now=now)['cost_totals'] == {'CNY': 1.5}
+    store.replace_tariffs({'expected': prices, 'tariffs': []}, now=now)
+    cleared = Store(store.path).usage_analysis(now=now)
+    assert cleared['cost_totals'] == {} and cleared['unpriced_kwh'] == 3
+    zero = [{'effective_date': '2026-09-10', 'rate': 0, 'currency': 'CNY'}]
+    store.replace_tariffs({'expected': [], 'tariffs': zero}, now=now)
+    assert store.usage_analysis(now=now)['cost_totals'] == {'CNY': 0}
+    with store.connect() as db:
+        assert list(db.execute('SELECT * FROM energy_usage_hours')) == original
+
+
+def test_tariff_replacement_rejects_stale_and_invalid_schedules_atomically(tmp_path):
+    store = Store(tmp_path / 'history.sqlite')
+    row = {'effective_date': '2026-09-10', 'rate': .5, 'currency': 'CNY'}
+    prices = store.replace_tariffs({'expected': [], 'tariffs': [row]})
+    for body in [{'expected': [], 'tariffs': []}, {'expected': prices, 'tariffs': [row, row]},
+                 {'expected': prices, 'tariffs': [{**row, 'rate': -1}]},
+                 {'expected': prices, 'tariffs': [{**row, 'effective_date': '2026-02-30'}]}]:
+        with pytest.raises(ValueError):
+            store.replace_tariffs(body)
+        assert store.usage_analysis()['tariffs'] == prices
+
+
+def test_session_event_window_filters_before_limit_and_preserves_event_notes(tmp_path):
+    store = Store(tmp_path / 'history.sqlite')
+    with store.connect() as db:
+        db.execute('INSERT INTO events(timestamp,kind,detail) VALUES(?,?,?)', (100, 'power', 'online:battery'))
+        timeline.append(db, 'application', 'delayed observation', 200, 110)
+        for stamp in range(300, 500):
+            timeline.append(db, 'application', 'newer', stamp, stamp)
+    store.event_note('legacy-1', '供电记录核查')
+    rows = store.timeline(5, 99, 120)
+    assert len(rows) == 2
+    assert rows[0]['occurred_at'] == 110 and rows[0]['observed_at'] == 200
+    assert rows[1]['note'] == '供电记录核查' and rows[1]['occurred_at'] is None
+    assert len(store.timeline(5)) == 5
+    for start, end in [(None, 120), (99, None), (120, 99), (0, 367 * 86400), (float('nan'), 120)]:
+        with pytest.raises(ValueError):
+            store.timeline(5, start, end)

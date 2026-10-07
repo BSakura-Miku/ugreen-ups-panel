@@ -1,0 +1,88 @@
+/* Neutral dashboard surfaces with explicit semantic accents. */
+:root{--surface:#1c2024;--canvas:#121518;--soft:#242a30;--ink:#ecf0f3;--muted:#a4afb9;--line:#343b42;--lime:#79cfa9;--accent-blue:#69b7fa;--accent-green:#79cfa9;--accent-amber:#efb663;color:var(--ink);background:var(--canvas);color-scheme:dark}
+:root[data-theme=light]{--surface:#fff;--canvas:#f4f6f8;--soft:#edf1f4;--ink:#23313c;--muted:#5b6b78;--line:#dce3e8;--lime:#24734f;--accent-blue:#216ba6;--accent-green:#24734f;--accent-amber:#9b5b08;color-scheme:light}
+body,.shell{background:var(--canvas);color:var(--ink)}
+main{max-width:1640px;padding-inline:32px}
+.sidebar{background:var(--surface);border-color:var(--line)}
+.panel,.overview-summary{background:var(--surface);border-color:var(--line);border-radius:16px}
+.panel{padding:22px}.overview-summary{padding:0 22px 6px}
+.page-heading{margin:26px 0 22px;gap:16px;flex-wrap:wrap}.page-heading h1{margin-right:auto;font-size:28px;letter-spacing:-.5px}
+.theme-picker{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.theme-picker select{background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:9px;padding:8px 10px;min-height:38px}
+nav button.selected{background:var(--soft);color:var(--lime)}
+.supply-status-row{border-color:var(--line);min-height:55px}.supply-state h2{font-size:16px}
+.overview-summary .primary-readings{grid-template-columns:repeat(4,minmax(0,1fr));padding:22px 0;gap:0}
+.primary-readings>.metric,.primary-readings>.soc-reading{border-color:var(--line);padding:0 22px}
+.primary-readings>.soc-reading{padding-left:0}.primary-readings .metric-value{font-size:38px;font-weight:650;letter-spacing:-1px;margin:10px 0 7px;color:var(--ink)}
+.primary-readings>.metric:nth-child(2) .metric-value{color:var(--accent-blue)}
+.primary-readings>.today-energy .metric-value{color:var(--accent-amber)}
+.primary-readings>.today-cost .metric-value{color:var(--accent-green)}
+.primary-readings .metric-label,.primary-readings .muted{color:var(--muted)}
+.primary-readings .metric-label svg{color:var(--muted)}
+.soc-track,.cell-track{background:var(--soft)}.soc-track>i,.cell-track>i{background:var(--accent-green)}
+.overview-summary .power-caption{border-color:var(--line);font-size:12px;padding-bottom:10px;color:var(--muted)}
+.telemetry-details>summary,.cell-more>summary{color:var(--muted)}
+.detail-grid{gap:18px;margin-top:18px;margin-bottom:18px}.detail-grid>.trend .chart{min-height:290px}
+.range{background:var(--soft);border-radius:9px;padding:4px}.range button{color:var(--muted);border-radius:6px}.range button.active{background:var(--surface);color:var(--lime);box-shadow:0 1px 4px #0002}
+.chart-controls select{background:var(--soft);border-color:var(--line);color:var(--ink);border-radius:8px}
+.cell-balance-delta strong{color:var(--ink)}.cell-balance .cell-reference-state{background:var(--soft);border-color:var(--line);color:var(--muted)}
+.cell-observation{background:var(--soft);border-color:var(--line)}
+.energy-usage,.battery-capacity{margin-bottom:18px}.overview-records+.event-timeline{margin-top:18px}
+.energy-summaries,.energy-day-detail,.energy-recorded-at{border-color:var(--line)}
+.energy-calendar-day{border-color:var(--line);border-radius:9px}.energy-calendar-day.is-selected{outline-color:var(--lime)}
+.energy-heat-0{background:var(--soft)}
+.energy-heat-1{background:#243a34}.energy-heat-2{background:#2b5144}.energy-heat-3{background:#336953}.energy-heat-4{background:#3d805f}.energy-heat-5{background:#47966f}
+:root[data-theme=light] .energy-heat-1{background:#edf6f0}:root[data-theme=light] .energy-heat-2{background:#dbeee1}:root[data-theme=light] .energy-heat-3{background:#bfe1cd}:root[data-theme=light] .energy-heat-4{background:#a0d0b5}:root[data-theme=light] .energy-heat-5{background:#82c09d}
+/* Existing diagnostic and detail surfaces share the light theme too. */
+[data-theme=light] :is(main,.sidebar) :is(p,span,small,dt,th,label,summary,figcaption,caption){color:var(--muted)}
+[data-theme=light] :is(main,.sidebar) :is(h1,h2,h3,h4,strong,dd,td){color:var(--ink)}
+[data-theme=light] :is(main,.sidebar) a{color:var(--lime)}
+[data-theme=light] :is(button,input,select,textarea){background-color:var(--soft);color:var(--ink);border-color:var(--line);color-scheme:light}
+[data-theme=light] :is(.panel,.metric,.cell-observation,.cell-reference-state,.usage-comparisons article,.capacity-progress,.capacity-stat){background-color:var(--surface);border-color:var(--line)}
+[data-theme=light] :is(.notice,.energy-recording-note,.power-alert,.cell-alert){background:#fff4df;border-color:#ddbd81;color:#74470a}
+[data-theme=light] :is(.notice,.power-alert,.cell-alert) :is(span,strong){color:#74470a}
+[data-theme=light] :is(.muted,.telemetry-note,.cell-balance-advice,.cell-current-note,.cell-note,.history-coverage summary){color:var(--muted)}
+[data-theme=light] .primary-readings .metric-value{color:var(--ink)}
+[data-theme=light] .primary-readings>.metric:nth-child(2) .metric-value{color:var(--accent-blue)}
+[data-theme=light] .primary-readings>.today-energy .metric-value{color:var(--accent-amber)}
+[data-theme=light] .primary-readings>.today-cost .metric-value{color:var(--accent-green)}
+[data-theme=light] .energy-calendar button{color:var(--ink)}
+[data-theme=light] .energy-calendar button span{color:var(--ink)}
+[data-theme=light] .energy-calendar button.is-selected{border-color:var(--lime)}
+[data-theme=light] .energy-chart-axis,[data-theme=light] .energy-chart-zero-label{fill:var(--muted)}
+[data-theme=light] .energy-chart-grid{stroke:var(--line)}
+[data-theme=light] .range button.active{background:var(--surface);color:var(--lime)}
+[data-theme=light] .brand{color:var(--ink)}
+@media(min-width:1800px){main{margin-right:auto}}
+@media(max-width:1100px){.overview-summary .primary-readings{grid-template-columns:repeat(2,minmax(0,1fr));gap:22px 0}.primary-readings>.metric:nth-child(2){border-right:0}.primary-readings>.today-energy{padding-left:0}}
+@media(max-width:760px){main{padding-inline:16px}.panel{padding:16px;border-radius:13px}.overview-summary{padding:0 16px 6px}.page-heading{margin:18px 0;gap:10px}.page-heading h1{font-size:24px}.page-heading .serial{display:none}.theme-picker>span{display:none}.overview-summary .primary-readings{gap:20px 0}.primary-readings>.metric,.primary-readings>.soc-reading{padding:0 12px}.primary-readings>.soc-reading,.primary-readings>.today-energy{padding-left:0}.overview-summary .primary-readings>.metric:last-child{grid-column:auto;border-top:0;padding:0 12px}.primary-readings .metric-value{font-size:30px}.detail-grid{gap:14px}.overview-records+.event-timeline{margin-top:14px}}
+body{--muted:inherit}
+[data-theme=light] nav button{background:transparent;color:var(--muted)}
+[data-theme=light] nav button.selected{background:var(--soft);color:var(--lime)}
+[data-theme=light] .cell-balance .cell-reference-state.good{background:#e7f3eb;color:#25623f;border-color:#bed9c8}
+[data-theme=light] .cell-balance .cell-reference-state.minor{background:#fff3d7;color:#7a570b;border-color:#e0cc98}
+[data-theme=light] .cell-balance .cell-reference-state.elevated{background:#fff0da;color:#8a5109;border-color:#e9c48a}
+[data-theme=light] .cell-balance .cell-reference-state.check{background:#ffe8e1;color:#9b3624;border-color:#e9b3a7}
+[data-theme=light] .cell-lowest-tag{background:var(--soft);color:var(--muted);border-color:var(--line)}
+[data-theme=light] :is(.cell-table th,.cell-table td,.cell-table tr,.session-table td,.session-table th){border-color:var(--line)}
+/* Page hierarchy and shared accessible surfaces. */
+.overview-trend{margin:18px 0}.brief-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin:18px 0}.brief-grid p{line-height:1.7}.brief-number{font-size:30px;color:var(--accent-amber)}.brief-number small{font-size:14px}.management-nav{display:flex;gap:8px;margin-bottom:20px;width:fit-content;max-width:100%;flex-wrap:wrap}.management-nav button{padding:9px 14px}.capacity-index .capacity-collecting{font-size:23px;line-height:1.5}.comparison-unavailable{font-size:20px;font-weight:650;color:var(--accent-amber)}.usage-comparisons .comparison-secondary{font-size:20px;color:var(--muted)}.session-summary .session-latest{font-size:18px;line-height:1.7}.session-cards{display:grid;gap:10px}.session-record{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:14px}.session-record>summary{display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr;align-items:center;gap:12px;cursor:pointer}.session-record>summary:before{content:'＋ 供电详情';color:var(--muted);font-size:12px;grid-column:1/-1}.session-record[open]>summary:before{content:'− 收起详情'}.session-detail{border-top:1px solid var(--line);margin-top:14px;padding-top:14px}.session-detail dl{display:flex;gap:24px;flex-wrap:wrap}.session-detail dd{margin:8px 0}.session-detail .chart{height:260px}.session-status.complete,.diag-status-ok{background:var(--soft);color:var(--accent-green);border-color:var(--line)}.session-status.incomplete,.session-status.ongoing,.diag-status-warning,.diag-status-error{background:var(--soft);color:var(--accent-amber);border-color:var(--line)}.session-statuses{flex-wrap:wrap}.coverage-detail{margin:14px 0;color:var(--muted);font-size:13px}.coverage-detail li{margin:7px 0}.calibration-editor>summary{font-size:16px;font-weight:600;padding:4px 0}.calibration-editor[open]>summary{margin-bottom:18px}.diag-card>summary{font-size:15px;font-weight:600}.diag-card[open]>summary{margin-bottom:16px}.anomaly-summary{border-color:var(--accent-amber)}
+:root[data-theme=light] :is(.session-summary,.session-scope,.session-record-count,.session-summary-details,.capacity-values,.capacity-reset-area,.usage-comparisons>article,.usage-cost,.calibration-values,.calibration-fields,.diag-system-grid,.diag-checks li,.timeline-list li){background:var(--surface);color:var(--ink);border-color:var(--line)}
+:root[data-theme=light] :is(.capacity-state,.capacity-progress-label,.capacity-timestamps,.energy-day-status,.energy-segment-badge,.session-quality,.diag-status-info,.diag-status-unknown,.calibration-badge){background:var(--soft);color:var(--muted);border-color:var(--line)}
+:root[data-theme=light] :is(table th,table td,details,dl>div){border-color:var(--line)}
+@media(max-width:850px){.brief-grid{grid-template-columns:1fr}.session-record>summary{grid-template-columns:1fr 1fr}.management-nav{width:100%}.management-nav button{flex:1;white-space:nowrap}.session-detail dl{gap:16px}.capacity-index .capacity-collecting{font-size:21px}}
+.management-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:16px 0}.management-summary strong{display:block;font-size:17px;line-height:1.5;margin:12px 0}.management-summary p{font-size:12px;line-height:1.6}.calibration-assistant>summary{font-size:16px;font-weight:600;cursor:pointer}.calibration-assistant[open]>summary{margin-bottom:18px}.calibration-steps{grid-template-columns:1fr}.calibration-step>summary{font-size:15px;cursor:pointer;padding:6px 0}.calibration-step[open]>summary{margin-bottom:16px}.session-detail dl>div{display:block;min-width:150px}.session-detail select{padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--soft);color:var(--ink)}.capacity-index .capacity-collecting{font-weight:600}
+@media(max-width:1100px){.management-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:760px){.capacity-body{grid-template-columns:1fr}.capacity-values{grid-column:1}.capacity-index{display:block}.capacity-index>strong{text-align:left}.management-summary{grid-template-columns:1fr 1fr;gap:10px}.management-summary .panel{padding:14px}.calibration-steps{display:block}.calibration-step{margin-top:12px}}
+.session-events{padding:16px;margin:16px 0 0;background:var(--soft);border-color:var(--line)}.session-events h3{font-size:15px}.session-events .panel-heading{flex-wrap:wrap;gap:12px}.timeline-list time{color:var(--muted)}.timeline-list>li{border-color:var(--line)}
+.management-nav{display:grid;grid-template-columns:repeat(4,max-content);flex-direction:row}.management-nav button{width:auto;margin:0;justify-content:center}.diag-top-grid{display:flex;flex-direction:column}.diag-top-grid>.update-version-stack{order:2}.diag-checks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 16px}.diag-connection-meta{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.diag-connection-meta>div{display:block}.diag-connection-meta dd{margin:8px 0}.diag-card .diag-check-warning{display:none}
+[data-theme=light] main .diag-status-ok,[data-theme=light] main .session-status.complete{color:var(--accent-green)}
+[data-theme=light] main :is(.diag-status-error,.diag-status-warning,.session-status.incomplete,.session-status.ongoing){color:var(--accent-amber)}
+@media(max-width:900px){.diag-checks{grid-template-columns:repeat(2,minmax(0,1fr))}.diag-connection-meta{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:760px){.management-nav{grid-template-columns:repeat(2,minmax(0,1fr))}.diag-checks{grid-template-columns:1fr}.session-events{padding:12px}.session-record>summary{font-size:13px}}
+[data-theme=light] .energy-calendar-day:is(.energy-heat-3,.energy-heat-4,.energy-heat-5) .energy-calendar-value{color:var(--ink)}
+[data-theme=light] .energy-calendar-day.is-future{border-color:var(--line);color:var(--muted);background:var(--canvas)}
+[data-theme=light] main .comparison-unavailable{color:var(--accent-amber)}
+[data-theme=light] :is(.calibration-voltage,.calibration-step,.calibration-preview,.calibration-window,.calibration-existing-base,.calibration-sampling,.update-info,.update-warning,.update-health,.tariff-confirm){background:var(--soft);border-color:var(--line);color:var(--ink)}
+[data-theme=light] .diag-axis-label{fill:var(--muted)}[data-theme=light] .diag-grid-line{stroke:var(--line)}
+.usage-comparisons .comparison-unavailable{font-size:18px;line-height:1.5;color:var(--accent-amber);margin:10px 0}

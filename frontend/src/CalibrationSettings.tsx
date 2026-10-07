@@ -174,7 +174,7 @@ export default function CalibrationSettings({ live, liveFresh, liveAge }: { live
   return <section className="calibration-page" aria-label="功率校准设置">
     <article className="panel calibration-active">
       <div className="panel-heading"><div><h3>{collectorReady ? '当前已生效' : data ? '最近一次采集器报告' : '采集器报告'}</h3><p>这里显示采集器报告的实际配置。</p></div><span className="calibration-badge">{reportedActive ? calibrationLabel(reportedActive.profile) : data?.configuration_problem?.profile ? calibrationLabel(data.configuration_problem.profile) : '尚未确认'}</span></div>
-      {active?.coefficients ? <><dl className="calibration-values">{fields.map(field => <div key={field.key}><dt>{field.label}</dt><dd title={active.coefficients![field.key] === null ? '未校准' : String(active.coefficients![field.key])}>{formatCoefficient(active.coefficients![field.key])}</dd></div>)}</dl><p className="muted">系数最多显示 4 位小数，计算保留完整精度。</p></> : <p className="muted">{active?.profile === 'none' ? '功率估算未启用，当前没有生效的校准系数。' : '等待采集器返回实际配置与系数。'}</p>}
+      {active?.coefficients ? <details><summary>查看已生效系数</summary><dl className="calibration-values">{fields.map(field => <div key={field.key}><dt>{field.label}</dt><dd title={active.coefficients![field.key] === null ? '未校准' : String(active.coefficients![field.key])}>{formatCoefficient(active.coefficients![field.key])}</dd></div>)}</dl><p className="muted">系数最多显示 4 位小数，计算保留完整精度。</p></details> : <p className="muted">{active?.profile === 'none' ? '功率估算未启用，当前没有生效的校准系数。' : '等待采集器返回实际配置与系数。'}</p>}
       {active?.profile !== 'none' && active && <p className="muted">{active.schema === 2 ? `适配器档位 ${active.ac_voltage_nominal_v} V · 交流采样范围 ${active.ac_voltage_nominal_v - 1}–${active.ac_voltage_nominal_v + 1} V` : '旧配置 · 交流范围 18–20 V；原有参数及行为保持不变。'}</p>}
       {active?.profile === 'custom' && <p className="calibration-caution">自定义系数未经过独立验证，估算值仅供参考。</p>}
       {data && !reportFresh && <p className="notice" role="status">配置连接中断或报告已过期，暂不能确认当前配置或保存。上方保留最近一次报告，正在编辑的内容不会丢失。</p>}
@@ -188,7 +188,7 @@ export default function CalibrationSettings({ live, liveFresh, liveAge }: { live
 
     {draft && data && <CalibrationAssistant key={assistantReset} live={live} liveFresh={liveFresh} liveAge={liveAge} enabled={assistantEnabled} supportsV2={supportsV2} disabledReason={assistantBlockReason} draft={draft} active={active || null} onVoltageChange={selectVoltage} onConfirmVoltage={acceptVoltage} onApply={fillAssistant} />}
 
-    <article className="panel calibration-editor">
+    <details className="panel calibration-editor" open={dirty || !!actionError || !!fillNotice || conflict}><summary>审核与保存配置 · 高级手动设置{dirty ? "（有未保存修改）" : ""}</summary>
       <div className="panel-heading"><div><h3 id="calibration-editor-heading"><SlidersHorizontal size={17} />待保存配置</h3><p>修改只影响功率估算，不改变原始电流或 NAS 的 UPS 保护。</p></div>{dirty && <span className="calibration-draft">有未保存修改</span>}</div>
       {pollError && <p className="notice" role="status">{pollError}</p>}
       {actionError && <p className="notice" role="alert">{actionError}</p>}
@@ -219,7 +219,7 @@ export default function CalibrationSettings({ live, liveFresh, liveAge }: { live
           <button className="calibration-secondary" type="button" disabled={!!busy} onClick={reload}><RefreshCw size={14} />{busy === 'reload' ? '正在载入…' : '重新载入'}</button>
         </div>
       </form> : <button className="calibration-secondary" type="button" onClick={reload} disabled={!!busy}>重新载入</button>}
-    </article>
+    </details>
 
     <details className="panel calibration-formulas"><summary>系数如何参与估算</summary>
       <p>交流输入功率 ≈ 交流基底系数 × 设备基底读数 + 回充补偿系数 × 电池充电功率原值</p>

@@ -1,5 +1,6 @@
 """Additional events are recorded prospectively; legacy times remain observed times."""
 import json
+import math
 import re
 
 
@@ -38,11 +39,20 @@ def observe(db, view, now):
             db.execute('INSERT OR REPLACE INTO meta VALUES(?,?)', (key, identity))
 
 
-def events(db, limit=100):
-    rows = db.execute('''SELECT 'legacy-' || id AS event_id, NULL AS occurred_at, timestamp AS observed_at,
+def events(db, limit=100, start=None, end=None):
+    if (start is None) != (end is None):
+        raise ValueError('请同时提供事件时间范围的起止时间。')
+    if start is not None and (type(start) not in (int, float) or type(end) not in (int, float)
+            or not math.isfinite(start) or not math.isfinite(end) or start < 0
+            or end < start or end - start > 366 * 86400):
+        raise ValueError('事件时间范围无效或超过一年。')
+    where = '' if start is None else 'WHERE COALESCE(occurred_at, observed_at) BETWEEN ? AND ?'
+    params = (limit,) if start is None else (start, end, limit)
+    rows = db.execute(f'''SELECT * FROM (
+                     SELECT 'legacy-' || id AS event_id, NULL AS occurred_at, timestamp AS observed_at,
                      kind, detail, 'collector_observation' AS source FROM events
-                     UNION ALL SELECT 'timeline-' || id, occurred_at, observed_at, kind, detail, source FROM timeline_events
-                     ORDER BY observed_at DESC, event_id DESC LIMIT ?''', (limit,)).fetchall()
+                     UNION ALL SELECT 'timeline-' || id, occurred_at, observed_at, kind, detail, source FROM timeline_events)
+                     {where} ORDER BY observed_at DESC, event_id DESC LIMIT ?''', params).fetchall()
     notes = dict(db.execute('SELECT event_id,note FROM timeline_notes'))
     return [dict(zip(('id', 'occurred_at', 'observed_at', 'kind', 'detail', 'source'), row), note=notes.get(row[0], '')) for row in rows]
 

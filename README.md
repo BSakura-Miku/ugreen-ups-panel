@@ -14,6 +14,8 @@
 
 ## 功能
 
+v0.14.5 将页面分为总览、用电分析、电池与供电、设备管理，支持跟随系统、深色和浅色外观。供电详情可查看附近趋势、事件与备注；用电分析支持电价更正和历史费用重算。
+
 - 查看外部供电、充电与电池供电状态。
 - 查看电量、输入/输出电压、电池组与四节电芯电压、电芯压差。
 - 查看最长一年的历史趋势、供电与连接事件，导出含均值和极值的 CSV。
@@ -123,7 +125,7 @@ services:
 
 **v0.12.0 的用电统计只需更新面板镜像；已有 v0.9.1 采集器和更新服务继续兼容。**
 
-**v0.9.1 可选启用[网页采集器更新](docs/collector-update.md)。** 首次安装宿主更新服务并添加通信目录挂载后，可在「诊断与说明」检查新版、更新和回退；需要管理密钥。已有 v0.8.0 采集器可直接作为起点。面板镜像仍通过 Docker 更新。
+**v0.9.1 可选启用[网页采集器更新](docs/collector-update.md)。** 首次安装宿主更新服务并添加通信目录挂载后，可在「设备管理 → 版本与更新」检查新版、更新和回退；需要管理密钥。已有 v0.8.0 采集器可直接作为起点。面板镜像仍通过 Docker 更新。
 
 已启用网页更新时，直接按[日常操作与升级后核对](docs/collector-update.md#日常操作)执行，无需重复首次安装。「检查更新」只查询发行版，点击「查看并更新」和「确认安装此版本」才开始升级。
 
@@ -136,7 +138,7 @@ services:
   set -eu
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT
-  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.14.4 -o "$tmp_dir/source.tar.gz"
+  curl -fL https://codeload.github.com/BSakura-Miku/ugreen-ups-panel/tar.gz/refs/tags/v0.14.5 -o "$tmp_dir/source.tar.gz"
   tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir"
   sudo sh "$tmp_dir/scripts/install-collector.sh" --data-dir /volume1/docker/ugreen-ups-panel/data
   sudo docker compose -f /volume1/docker/ugreen-ups-panel/docker-compose.yaml pull
@@ -148,7 +150,7 @@ services:
 
 ## 网页功率校准
 
-打开**功率校准**，可查看当前实际配置、系数与公式。新手可按分步助手操作：
+打开**设备管理 → 功率校准**，可查看当前实际配置、系数与公式。新手可按分步助手操作：
 
 1. **确认适配器电压。** 页面根据适配器输入读数预选 `12/19/20 V`，仍需自己确认；不是按 UPS 输出电压选择。
 2. **校准交流基底。** 保持外部供电、未充电且负载稳定，采样 30 秒后填入同期智能插座或功率计的交流读数（W）。这一步可单独保存，先启用未充电时的交流估算。
@@ -223,7 +225,7 @@ sudo docker compose config
 
 ## 没有数据时
 
-先打开「诊断与说明」，区分私有报文、系统查询和历史写入问题。宿主机可运行已安装版本的只读自检：
+先打开「设备管理 → 运行诊断」，区分私有报文、系统查询和历史写入问题。宿主机可运行已安装版本的只读自检：
 
 ```sh
 cd /opt/ugreen-ups-panel/current

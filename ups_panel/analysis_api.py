@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 from fastapi import HTTPException, Query, Request
 
 
-async def mutation_body(request):
+async def mutation_body(request, limit=4096):
     if (request.headers.get('x-ups-settings') != '1'
             or request.headers.get('content-type', '').split(';')[0].strip().lower() != 'application/json'
             or request.headers.get('sec-fetch-site') in ('cross-site', 'same-site')):
@@ -24,7 +24,7 @@ async def mutation_body(request):
     body = bytearray()
     async for chunk in request.stream():
         body.extend(chunk)
-        if len(body) > 4096:
+        if len(body) > limit:
             raise HTTPException(413, '设置内容过大。')
     try:
         value = json.loads(body)
@@ -57,10 +57,24 @@ def install_analysis_routes(app, store):
         except (OSError, sqlite3.Error):
             raise HTTPException(503, '电价暂未保存，请重新读取后再试。') from None
 
-    @app.get('/api/timeline')
-    def events(limit: int = Query(100, ge=1, le=200)):
+    @app.put('/api/energy-usage/tariffs')
+    async def replace_tariffs(request: Request):
+        value = await mutation_body(request, limit=262144)
         try:
-            return store().timeline(limit)
+            return await asyncio.to_thread(store().replace_tariffs, value)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+        except (OSError, sqlite3.Error):
+            raise HTTPException(503, '电价暂未保存，请重新读取后再试。') from None
+
+    @app.get('/api/timeline')
+    def events(limit: int = Query(100, ge=1, le=200),
+               start: float = Query(None, ge=0, le=32503680000),
+               end: float = Query(None, ge=0, le=32503680000)):
+        try:
+            return store().timeline(limit, start, end)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
         except (OSError, sqlite3.Error):
             raise HTTPException(503, '事件暂不可用。') from None
 

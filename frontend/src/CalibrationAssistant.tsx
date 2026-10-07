@@ -135,7 +135,7 @@ export default function CalibrationAssistant({ live, liveFresh, liveAge, enabled
     setChargeSampling(createSamplingState('charging', draft.voltage)); setChargeBaseToken(baseToken); setChargeWatts(''); setContextNotice('');
   }
 
-  return <article className="panel calibration-assistant">
+  return <details className="panel calibration-assistant"><summary>开始或继续交流功率校准</summary>
     <div className="panel-heading"><div><h3><FlaskConical size={18} />交流功率校准助手</h3><p>用插座功率计分两步估算系数，也可以只完成第一步。</p></div><span className="calibration-badge">手动核对后保存</span></div>
     {!supportsV2 ? <p className="notice" role="status">当前采集器不支持分步校准。请先更新宿主机采集器；下方仍可填写旧版的三个校准系数。</p> : <>
       <p className="calibration-assistant-intro">只填写接在适配器前的智能插座或交流数显功率计读数（W）。让负载保持稳定，观察并记下每次 30 秒采样同期的功率，采样结束后再填写。采样至少需要 12 条独立读数，相关原始读数的波动不能超过均值的 10%。</p>
@@ -143,31 +143,31 @@ export default function CalibrationAssistant({ live, liveFresh, liveAge, enabled
       {!enabled && <p className="notice" role="status">{disabledReason || '校准配置尚未就绪，请查看下方检查结果。'}</p>}
       {enabled && !streamFresh && <p className="notice" role="status">实时采样已中断或超过 5 秒未更新。正在采集的窗口会重置，恢复后可继续；已完成的窗口保持冻结。</p>}
       {contextNotice && <p className="notice" role="status">{contextNotice}</p>}
-      <div className="calibration-steps">
+      {draft.voltageConfirmed ? <div className="calibration-steps">
         <section className="calibration-step" aria-labelledby="calibration-step-base">
           <div className="calibration-step-title"><span>1</span><div><h4 id="calibration-step-base">交流基底 a</h4><p>外部供电，电池未充电</p></div></div>
           <p className="calibration-step-description">等待充电停止并保持负载稳定，记录这次采样期间的插座功率。</p>
           <button type="button" className="calibration-secondary" disabled={!ready} onClick={startBase}>{baseSampling ? <RotateCcw size={14} /> : <Play size={14} />}{baseSampling ? '重新采样 30 秒' : '开始 30 秒采样'}</button>
           <SamplingProgress state={baseSampling} />
           <div className="calibration-meter-field"><label htmlFor="calibration-base-watts">同期稳定的插座功率（W）</label><input id="calibration-base-watts" type="text" inputMode="decimal" autoComplete="off" placeholder="完成采样后填写" disabled={!ready || !baseSampling?.window} value={baseWatts} onChange={event => setBaseWatts(event.target.value)} aria-describedby="calibration-base-formula" /></div>
-          <p id="calibration-base-formula" className="calibration-step-formula">a = 插座功率 ÷ 本次平均基底读数</p>
+          <details><summary>计算方式</summary><p id="calibration-base-formula" className="calibration-step-formula">a = 插座功率 ÷ 本次平均基底读数</p></details>
           {baseWatts && baseResult?.error && <p className="calibration-result-error" role="status">{baseResult.error}</p>}
           {baseResult?.value !== null && baseResult?.value !== undefined && <p className="calibration-calculated">建议 a <strong title={String(baseResult.value)}>{formatCoefficient(baseResult.value)}</strong></p>}
           {existingBase !== null && <div className="calibration-existing-base"><p>当前已生效的 {draft.voltage} V 配置已有基底系数 <strong title={String(existingBase)}>{formatCoefficient(existingBase)}</strong>。若继续沿用，可确认后直接进入第二步。</p><button type="button" className="calibration-secondary" disabled={!ready || existingBaseConfirmed} onClick={() => { setExistingBaseConfirmed(true); setBaseSampling(null); setBaseWatts(''); }}>{existingBaseConfirmed ? <><Check size={14} />已确认使用现有基底</> : '确认使用现有基底'}</button></div>}
           {active?.schema === 1 && active.coefficients && <p className="muted">旧配置没有已确认的电压档位，请重新完成第一步，或在下方手动填写交流系数。</p>}
         </section>
-        <section className="calibration-step" aria-labelledby="calibration-step-charge">
+        <details className="calibration-step" aria-labelledby="calibration-step-charge"><summary>第二步 · 回充补偿（可选）</summary>
           <div className="calibration-step-title"><span>2</span><div><h4 id="calibration-step-charge">回充补偿 b <small>可选</small></h4><p>外部供电，电池正在充电</p></div></div>
           <p className="calibration-step-description">保留第一步系数，等待稳定回充。平均回充原始功率至少需要 2 W。</p>
           <button type="button" className="calibration-secondary" disabled={!ready || selectedBase === null} onClick={startCharge}>{chargeSampling ? <RotateCcw size={14} /> : <Play size={14} />}{chargeSampling ? '重新采样 30 秒' : '开始 30 秒采样'}</button>
           {selectedBase === null ? <p className="muted">先完成第一步，或确认沿用同档位的现有基底系数。</p> : <p className="muted">本步使用 a = <span title={String(selectedBase)}>{formatCoefficient(selectedBase)}</span>；a 改变后，本步采样与建议会清除。</p>}
           <SamplingProgress state={chargeSampling} />
           <div className="calibration-meter-field"><label htmlFor="calibration-charge-watts">本次充电同期的插座功率（W）</label><input id="calibration-charge-watts" type="text" inputMode="decimal" autoComplete="off" placeholder="完成采样后填写" disabled={!ready || !chargeSampling?.window} value={chargeWatts} onChange={event => setChargeWatts(event.target.value)} aria-describedby="calibration-charge-formula" /></div>
-          <p id="calibration-charge-formula" className="calibration-step-formula">b =（插座功率 − a × 本次平均基底读数）÷ 本次平均回充原始功率</p>
+          <details><summary>计算方式</summary><p id="calibration-charge-formula" className="calibration-step-formula">b =（插座功率 − a × 本次平均基底读数）÷ 本次平均回充原始功率</p></details>
           {chargeWatts && chargeResult?.error && <p className="calibration-result-error" role="status">{chargeResult.error}</p>}
           {chargeResult?.value !== null && chargeResult?.value !== undefined && <p className="calibration-calculated">建议 b <strong title={String(chargeResult.value)}>{formatCoefficient(chargeResult.value)}</strong></p>}
-        </section>
-      </div>
+        </details>
+      </div> : <p className="muted">先确认适配器铭牌上的额定电压，再开始采样。</p>}
       {preview && suggestion && <div className="calibration-preview">
         <h4>填入前预览 · {suggestion.voltage} V</h4>
         <p className="muted">下面比较当前草稿与即将填入的数值。未改动的已有系数保留完整精度；电池放电系数需另行校准。</p>
@@ -177,5 +177,5 @@ export default function CalibrationAssistant({ live, liveFresh, liveAge, enabled
       </div>}
       <p className="calibration-assistant-footnote">采样中若供电状态、设备、数据来源或计算配置变化，或采样倒序、间隔超过 5 秒，将从头计时。助手不会自动保存系数。</p>
     </>}
-  </article>;
+  </details>;
 }
